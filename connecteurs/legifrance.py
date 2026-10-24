@@ -283,11 +283,18 @@ def _canon_code(code):
     return c
 
 
+# « article », « Article », « articles », « art. », « Art. », « l'article » en tête d'une désignation
+_RE_PREFIXE_ARTICLE = re.compile(r"^\s*(?:l['’]\s*)?art(?:icle)?s?\.?\s*", re.IGNORECASE)
+
+
 def _art_candidates(article):
-    """Du plus spécifique au plus général : retire les alinéas (« 8° », « a) ») et,
-    en cascade, les subdivisions terminales séparées par un tiret (ex. CGI 158-5-a -> 158).
-    « L. 314-11 8° » -> ['L314-11', 'L314'] ; « 158-5-a » -> ['158-5-a','158-5','158']."""
-    a = re.sub(r"\s*\d+\s*°.*$", "", article or "")     # retire « 8° … »
+    """Du plus spécifique au plus général : retire le mot « article » ou « art. » en tête, les
+    alinéas (« 8° », « a) ») et, en cascade, les subdivisions terminales séparées par un tiret
+    (ex. CGI 158-5-a -> 158).
+    « L. 314-11 8° » -> ['L314-11', 'L314'] ; « 158-5-a » -> ['158-5-a','158-5','158'] ;
+    « Article L. 181-18 » -> ['L181-18', 'L181'] ; « article 6 » -> ['6']."""
+    a = _RE_PREFIXE_ARTICLE.sub("", article or "")      # retire « article », « art. »
+    a = re.sub(r"\s*\d+\s*°.*$", "", a)                  # retire « 8° … »
     a = re.sub(r"\s*[a-zA-Z]\s*\)\s*$", "", a)          # retire « a) »
     core = re.sub(r"[\s.]", "", a.strip())                # « L. 314-11 » -> « L314-11 »
     bases = [core] if core else []
@@ -311,9 +318,11 @@ def _art_candidates(article):
 
 def _meme_article(demande, rendu):
     """Deux écritures d'un même numéro d'article (« L. 321-3 » et « L321-3 ») désignent-elles le
-    même article ? Comparaison sur la forme canonique, sans espaces ni points, alinéas retirés."""
+    même article ? Comparaison sur la forme canonique, sans « article » ou « art. » en tête,
+    sans espaces ni points, alinéas retirés."""
     def canon(x):
-        x = re.sub(r"\s*\d+\s*°.*$", "", str(x or ""))      # « 8° … »
+        x = _RE_PREFIXE_ARTICLE.sub("", str(x or ""))       # « article », « art. »
+        x = re.sub(r"\s*\d+\s*°.*$", "", x)                 # « 8° … »
         x = re.sub(r"\s*[a-zA-Z]\s*\)\s*$", "", x)          # « a) »
         return re.sub(r"[\s.‑]", "", x).strip().lower()
     return bool(canon(demande)) and canon(demande) == canon(rendu)
@@ -393,7 +402,8 @@ def resoudre_loi(nom, article, date):
 
 def resoudre(code, article, date):
     """Retourne l'article de <code> portant le n° <article>, dans sa version au <date>.
-    Tolère les alias de codes (CESEDA, CGI, LPF...) et les suffixes d'alinéa (« 8° »).
+    Tolère les alias de codes (CESEDA, CGI, LPF...), le mot « article » ou « art. » devant le
+    numéro et les suffixes d'alinéa (« 8° »).
 
     Si le texte visé n'est pas un code mais une LOI, la recherche est aiguillée vers le fonds
     LODA : les deux fonds sont distincts, et chercher un article de loi dans CODE_DATE ne rend
