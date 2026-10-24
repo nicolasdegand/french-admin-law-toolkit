@@ -175,6 +175,33 @@ def _iso(ms):
     if not ms: return None
     return datetime.datetime.utcfromtimestamp(ms/1000).strftime("%Y-%m-%d")
 
+
+# ==================================================================================================
+# DATE DE FIN « SANS TERME ».
+#
+# Légifrance ne laisse pas vide la date de fin d'une version en vigueur : il y inscrit le
+# 1er janvier 2999, soit 32472144000000 ms. Constaté le 24/10/2026 sur les articles en vigueur du
+# code civil (champ `dateFin` de toutes les versions à l'état VIGUEUR) et sur l'article L. 181-18 du
+# code de l'environnement (« Date fin vigueur : 01/01/2999 »).
+#
+# Lue comme une vraie date, elle s'affichait : « 2023-03-12 → 2999-01-01 ». `_iso_fin` la rend None,
+# ce qui veut dire « pas de fin » : travaux.py et la démonstration de ce module affichent alors
+# « en cours », comme ils le prévoyaient.
+#
+# Toute date à partir du 1er janvier 2999 est traitée de même, au cas où Légifrance emploierait une
+# variante (31/12/2999...). Une autre date conventionnelle, antérieure à 2999, ne serait PAS
+# reconnue : aucune n'a été observée. Une vraie date de fin future (abrogation programmée au
+# 1er janvier 2027, par exemple) est conservée.
+# ==================================================================================================
+_SANS_FIN_MS = 32472144000000          # 2999-01-01 00:00 UTC
+
+
+def _iso_fin(ms):
+    """Date de fin d'une version : None si elle est absente ou « sans terme » (voir ci-dessus)."""
+    if ms and ms >= _SANS_FIN_MS:
+        return None
+    return _iso(ms)
+
 def _find_ids(obj, acc):
     # parcours récursif pour récupérer les identifiants LEGIARTI
     if isinstance(obj, dict):
@@ -414,7 +441,7 @@ def resoudre_loi(nom, article, date, exact=False):
                 "exact": est_exact, "id": aid, "num": a.get("num"),
                 "alineas": alineas_de_html(html),
                 "texte": re.sub(r"<[^>]+>", " ", html).strip(),
-                "version_debut": _iso(a.get("dateDebut")), "version_fin": _iso(a.get("dateFin")),
+                "version_debut": _iso(a.get("dateDebut")), "version_fin": _iso_fin(a.get("dateFin")),
                 "lien": ("https://www.legifrance.gouv.fr/loda/article_lc/%s" % aid) if aid
                         else ("https://www.legifrance.gouv.fr/loda/id/%s" % tid),
             }
@@ -425,7 +452,8 @@ def resoudre_loi(nom, article, date, exact=False):
 def resoudre(code, article, date, exact=False):
     """Retourne l'article de <code> portant le n° <article>, dans sa version au <date>.
     Tolère les alias de codes (CESEDA, CGI, LPF...), le mot « article » ou « art. » devant le
-    numéro et les suffixes d'alinéa (« 8° »).
+    numéro et les suffixes d'alinéa (« 8° »). `version_fin` vaut None pour une version sans
+    terme, c'est-à-dire encore en vigueur (voir `_iso_fin`).
 
     Par défaut, un article autre que celui demandé, rendu par la cascade de `_art_candidates`,
     est renvoyé avec `exact` False ; c'est à l'appelant de l'écarter ou de le retenir (CGI :
@@ -468,7 +496,7 @@ def resoudre(code, article, date, exact=False):
                 [(art.get("texte") or "").strip()] if (art.get("texte") or "").strip() else []),
             "texte": (art.get("texte") or "").strip(),
             "version_debut": _iso(art.get("dateDebut")),
-            "version_fin": _iso(art.get("dateFin")),
+            "version_fin": _iso_fin(art.get("dateFin")),
             "lien": f"https://www.legifrance.gouv.fr/codes/article_lc/{art.get('id') or ids[0]}",
         }
         return _ecarter_inexact(r) if exact else r
@@ -851,7 +879,7 @@ def historique_article(code, article, date=None):
         except Exception as e:
             panne = _panne(e)
         out.append({"version": v.get("version"), "debut": _iso(v.get("dateDebut")),
-                    "fin": _iso(v.get("dateFin")), "etat": v.get("etat"),
+                    "fin": _iso_fin(v.get("dateFin")), "etat": v.get("etat"),
                     "lien_version": ("https://www.legifrance.gouv.fr/%s/article_lc/%s"
                                      % ("loda" if est_loi else "codes", vid)) if vid else None,
                     "modif": modif})
