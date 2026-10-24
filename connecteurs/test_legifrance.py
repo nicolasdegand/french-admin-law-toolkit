@@ -4,6 +4,7 @@
 Lancement, depuis la racine du dépôt :
     python -m unittest discover -s connecteurs -v
 """
+import ast
 import unittest
 from unittest import mock
 
@@ -250,6 +251,17 @@ class Pannes(unittest.TestCase):
             self.appeler(post_en_panne("/consult/legiPart"),
                          legifrance.resoudre_loi, self.LOI, "article 6", "2024-03-15")
         self.assertEqual(legifrance.DERNIERE_PANNE["nombre"], 2)
+
+
+class Structure(unittest.TestCase):
+    """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
+    une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
+
+    def test_demonstration_en_fin_de_fichier(self):
+        with open(legifrance.__file__, encoding="utf-8") as f:
+            derniere = ast.parse(f.read()).body[-1]
+        self.assertIsInstance(derniere, ast.If)
+        self.assertIn("__main__", ast.unparse(derniere.test))
 
 
 if __name__ == "__main__":
