@@ -59,6 +59,31 @@ def _lien_texte(cid):
 
 _MESSAGE_PANNE = "PISTE n'a pas répondu : recherche inaboutie, à relancer."
 
+# Textes créateurs dont les travaux propres n'éclairent pas, ou peu, l'intention du législateur :
+# l'outil le dit et indique où chercher (il ne cherche pas lui-même ces autres textes).
+_AVERTISSEMENT_ORDONNANCE = (
+    "Version issue d'une ordonnance : pas de débats parlementaires sur ce texte. À consulter : "
+    "le rapport au Président de la République publié avec l'ordonnance, la loi d'habilitation et "
+    "ses travaux, et, s'il y a lieu, la loi de ratification et ses travaux.")
+_AVERTISSEMENT_CODIFICATION = (
+    "Le titre de ce texte évoque une codification : si elle est à droit constant, l'intention du "
+    "législateur se trouve dans les travaux de la loi d'origine des dispositions codifiées.")
+# Indice seulement : rien dans les données ne dit qu'une codification est à droit constant.
+_RE_CODIFICATION = re.compile(r"partie législative|codification", re.IGNORECASE)
+
+
+def _avertissements(nature, titre):
+    """Avertissements sur le texte créateur de la version, d'après sa nature et son titre :
+    ordonnance (nature ORDONNANCE, ou titre commençant par « Ordonnance ») ; codification (titre
+    évoquant la « partie législative » d'un code ou une « codification »). Liste, vide si aucun."""
+    nature, titre = (nature or "").strip().upper(), (titre or "").strip()
+    out = []
+    if nature == "ORDONNANCE" or titre.lower().startswith("ordonnance"):
+        out.append(_AVERTISSEMENT_ORDONNANCE)
+    if _RE_CODIFICATION.search(titre):
+        out.append(_AVERTISSEMENT_CODIFICATION)
+    return out
+
 
 def _date_valide(date):
     """Vrai si <date> est une date réelle au format AAAA-MM-JJ, celui qu'attend legifrance.py
@@ -76,6 +101,8 @@ def travaux_pour_article(code, article, date):
     <article> du <code> applicable au <date> (YYYY-MM-DD).
     Une date invalide est refusée d'emblée : `trouve` False, `date_invalide` True, et un message
     qui rappelle le format attendu ; PISTE n'est pas interrogé.
+    Si le texte créateur est une ordonnance ou semble être une codification, la réponse porte un
+    `avertissement` qui dit où chercher l'intention du législateur (voir `_avertissements`).
     Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident), comme celles
     de legifrance.py : avec `trouve` False si l'article ou son texte créateur n'ont pu être
     identifiés ; avec `trouve` True si seuls les travaux ou le dossier n'ont pu être lus."""
@@ -155,6 +182,9 @@ def travaux_pour_article(code, article, date):
         "nota": _clean(art.get("nota")),
         "ratione_temporis": "Texte ayant créé la version applicable au litige (non la rédaction actuelle).",
     }
+    avertissements = _avertissements(nature, titre)
+    if avertissements:
+        reponse["avertissement"] = " ".join(avertissements)
     if panne:
         reponse["panne"] = panne
     return reponse
