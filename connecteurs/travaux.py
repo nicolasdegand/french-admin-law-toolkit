@@ -164,19 +164,6 @@ def travaux_pour_textes(textes, date):
     return out
 
 
-if __name__ == "__main__":
-    import json
-    for code, art, d in [("Code de l'environnement", "L. 181-18", "2020-01-01"),
-                         ("Code de l'environnement", "R. 181-28", "2020-01-01")]:
-        print("\n====", art, "du", code, "au", d, "====")
-        res = travaux_pour_article(code, art, d)
-        print(json.dumps({k: v for k, v in res.items() if k != "travaux_preparatoires"},
-                         ensure_ascii=False, indent=1))
-        if res.get("travaux_preparatoires"):
-            print("Travaux préparatoires (extrait):")
-            print(res["travaux_preparatoires"][:500])
-
-
 def _pieces_from_arbo(arbo):
     """Aplati l'arborescence d'un dossier législatif en liste de pièces {libelle, lien, categorie}."""
     out = []
@@ -218,3 +205,19 @@ def dossier_pieces(dole_id, max_pieces=40):
             continue
         seen.add(p["lien"]); uniq.append(p)
     return {"pieces": uniq[:max_pieces], "expose_motif": _clean(d.get("exposeMotif"))}
+
+
+# Démonstration, exécutée seulement au lancement direct (`python travaux.py`).
+# À GARDER EN FIN DE FICHIER : Python exécute le fichier de haut en bas, et une fonction définie plus
+# bas n'existerait pas encore au moment de la démonstration (vérifié par test_travaux.py).
+if __name__ == "__main__":
+    import json
+    for code, art, d in [("Code de l'environnement", "L. 181-18", "2020-01-01"),
+                         ("Code de l'environnement", "R. 181-28", "2020-01-01")]:
+        print("\n====", art, "du", code, "au", d, "====")
+        res = travaux_pour_article(code, art, d)
+        print(json.dumps({k: v for k, v in res.items() if k != "travaux_preparatoires"},
+                         ensure_ascii=False, indent=1))
+        if res.get("travaux_preparatoires"):
+            print("Travaux préparatoires (extrait):")
+            print(res["travaux_preparatoires"][:500])
