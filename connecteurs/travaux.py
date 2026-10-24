@@ -26,13 +26,10 @@ def _retry(fn, n=3):
     raise last
 
 def _clean(html):
-    if not html:
-        return ""
-    t = re.sub(r"<br\s*/?>", "\n", html)
-    t = re.sub(r"<[^>]+>", " ", t)
-    t = re.sub(r"[ \t]+", " ", t)
-    t = re.sub(r"\n\s*\n+", "\n", t)
-    return t.strip()
+    """Texte lisible d'un champ HTML de PISTE (travaux préparatoires, exposé des motifs, nota) :
+    un alinéa par ligne, entités décodées (« &#233; » -> « é », « &nbsp; » -> espace).
+    Repose sur `legifrance.alineas_de_html`, qui traite de même le texte des articles."""
+    return "\n".join(legifrance.alineas_de_html(html))
 
 
 _RE_REGLEMENTAIRE = re.compile(r"""
