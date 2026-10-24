@@ -94,6 +94,14 @@ législatif et ses travaux préparatoires. Une disposition réglementaire (R. ou
 D.) n'a pas de travaux parlementaires : le module le dit plutôt que de chercher
 en vain.
 
+**Le module rend des liens, pas le contenu des pièces.** Il donne l'exposé des
+motifs, la note de travaux préparatoires publiée au Journal officiel et la liste
+des pièces du dossier législatif (projet, rapports, débats, textes adoptés),
+chacune avec son lien. Le texte des rapports et des débats n'est pas récupéré :
+pour le citer, il faut ouvrir la pièce. Lorsque le texte créateur est une
+ordonnance, ou semble être une codification, la réponse porte un
+`avertissement` qui indique où chercher l'intention du législateur.
+
 ## EUR-Lex
 
 ```python
