@@ -65,9 +65,15 @@ def _lien_texte(cid):
     return f"https://www.legifrance.gouv.fr/jorf/id/{cid}"
 
 
+_MESSAGE_PANNE = "PISTE n'a pas répondu : recherche inaboutie, à relancer."
+
+
 def travaux_pour_article(code, article, date):
     """Retourne les travaux parlementaires du texte ayant créé la version de
-    <article> du <code> applicable au <date> (YYYY-MM-DD)."""
+    <article> du <code> applicable au <date> (YYYY-MM-DD).
+    Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident), comme celles
+    de legifrance.py : avec `trouve` False si l'article ou son texte créateur n'ont pu être
+    identifiés ; avec `trouve` True si seuls les travaux ou le dossier n'ont pu être lus."""
     if not legifrance:
         return {"trouve": False, "erreur": "connecteur Légifrance indisponible"}
     if _est_reglementaire(article):
@@ -75,8 +81,15 @@ def travaux_pour_article(code, article, date):
                 "message": "Disposition réglementaire : pas de travaux parlementaires."}
     # exact=True : un autre article que celui demandé (« L. 181-18 » pour « L. 181-18-1 ») est
     # écarté par legifrance.py, qui rend alors `exact` False, et le `num` et le `lien` du plus proche.
-    r = legifrance.resoudre(code, article, date, exact=True)
+    try:
+        r = legifrance.resoudre(code, article, date, exact=True)
+    except Exception as e:
+        return {"trouve": False, "article": article, "code": code,
+                "panne": legifrance._panne(e), "message": _MESSAGE_PANNE}
     if not r.get("trouve"):
+        if r.get("panne"):
+            return {"trouve": False, "article": article, "code": code,
+                    "panne": r["panne"], "message": _MESSAGE_PANNE}
         if r.get("exact") is False:
             return {"trouve": False, "exact": False, "article": article, "code": code,
                     "num": r.get("num"), "lien": r.get("lien"),
@@ -84,7 +97,11 @@ def travaux_pour_article(code, article, date):
         return {"trouve": False, "article": article, "code": code,
                 "message": "Version de l'article non résolue à cette date."}
     version = f'{r.get("version_debut")} → {r.get("version_fin") or "en cours"}'
-    art = _retry(lambda: legifrance._post("/consult/getArticle", {"id": r["id"]})).get("article", {})
+    try:
+        art = _retry(lambda: legifrance._post("/consult/getArticle", {"id": r["id"]})).get("article", {})
+    except Exception as e:
+        return {"trouve": False, "article": article, "code": code, "version": version,
+                "panne": legifrance._panne(e), "message": _MESSAGE_PANNE}
     # texte ayant CRÉÉ cette version
     cree = None
     for l in (art.get("lienModifications") or []):
@@ -103,6 +120,7 @@ def travaux_pour_article(code, article, date):
     # consultation du texte -> dossier législatif + travaux préparatoires
     doss_id = None
     prep = ""
+    panne = None
     nature = cree.get("natureText")
     titre = cree.get("textTitle")
     try:
@@ -113,10 +131,11 @@ def travaux_pour_article(code, article, date):
         dl = js.get("dossiersLegislatifs") or []
         if dl:
             doss_id = dl[0].get("id")
-    except Exception:
-        pass
+    except Exception as e:
+        panne = legifrance._panne(e)
     dp = dossier_pieces(doss_id) if doss_id else {"pieces": [], "expose_motif": None}
-    return {
+    panne = panne or dp.get("panne")
+    reponse = {
         "trouve": True, "article": article, "code": code, "version": version,
         "loi": {"titre": titre, "nature": nature, "cid": cid,
                 "date_publi": cree.get("datePubliTexte")},
@@ -128,6 +147,9 @@ def travaux_pour_article(code, article, date):
         "nota": _clean(art.get("nota")),
         "ratione_temporis": "Texte ayant créé la version applicable au litige (non la rédaction actuelle).",
     }
+    if panne:
+        reponse["panne"] = panne
+    return reponse
 
 
 def travaux_pour_textes(textes, date):
@@ -173,14 +195,15 @@ def _pieces_from_arbo(arbo):
 
 def dossier_pieces(dole_id, max_pieces=40):
     """Consulte un dossier législatif (JORFDOLE) et renvoie ses pièces avec liens
-    (projet de loi, rapports, débats, exposé des motifs...) + l'exposé des motifs."""
+    (projet de loi, rapports, débats, exposé des motifs...) + l'exposé des motifs.
+    Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident)."""
     if not legifrance or not dole_id:
         return {"pieces": [], "expose_motif": None}
     try:
         d = _retry(lambda: legifrance._post("/consult/dossierLegislatif",
                                             {"id": dole_id})).get("dossierLegislatif", {})
-    except Exception:
-        return {"pieces": [], "expose_motif": None}
+    except Exception as e:
+        return {"pieces": [], "expose_motif": None, "panne": legifrance._panne(e)}
     pieces = _pieces_from_arbo(d.get("arborescence") or {})
     for t in (d.get("dossiers") or []):
         lib = t.get("libelleTexte"); idt = t.get("idTexte")
