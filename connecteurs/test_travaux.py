@@ -186,6 +186,36 @@ class Pannes(unittest.TestCase):
         self.assertEqual(r["pieces"], [])
 
 
+class TextesDecodes(unittest.TestCase):
+    """_clean : un alinéa par ligne, entités HTML décodées. Extraits fictifs."""
+
+    HTML = ("<p>Rapport n&#176; 1234 de M.&nbsp;Dupont, d&#233;put&#233;, au nom de la commission&nbsp;:</p>"
+            "<p>&laquo;&nbsp;L&apos;article 1er&nbsp;&raquo; &amp; suivants</p>")
+
+    def test_entites_et_alineas(self):
+        self.assertEqual(travaux._clean(self.HTML),
+                         "Rapport n° 1234 de M. Dupont, député, au nom de la commission :\n"
+                         "« L'article 1er » & suivants")
+
+    def test_vide(self):
+        for vide in ("", None):
+            with self.subTest(html=vide):
+                self.assertEqual(travaux._clean(vide), "")
+
+    def test_travaux_et_expose_des_motifs_decodes(self):
+        reponses = dict(Pannes.REPONSES)
+        reponses["/consult/jorf"] = dict(reponses["/consult/jorf"], prepWork=self.HTML)
+        reponses["/consult/dossierLegislatif"] = {"dossierLegislatif": {"exposeMotif": self.HTML}}
+        with mock.patch.object(travaux.legifrance, "resoudre", return_value=Pannes.TROUVE), \
+             mock.patch.object(travaux.legifrance, "_post", lambda chemin, charge: reponses[chemin]):
+            r = travaux.travaux_pour_article("Code de l'environnement", "L. 181-18-1", "2024-03-15")
+        for champ in ("travaux_preparatoires", "expose_motif"):
+            with self.subTest(champ=champ):
+                self.assertIn("député", r[champ])
+                self.assertNotIn("&", r[champ].replace("& suivants", ""))
+                self.assertEqual(len(r[champ].splitlines()), 2)
+
+
 class Demonstration(unittest.TestCase):
     """Le lancement direct (`python travaux.py`) exécute la démonstration jusqu'au bout."""
 
@@ -200,6 +230,7 @@ class Demonstration(unittest.TestCase):
         comme PISTE et trouve un dossier législatif : la démonstration va jusqu'à `dossier_pieces`."""
         faux = types.ModuleType("legifrance")
         faux._panne = str
+        faux.alineas_de_html = travaux.legifrance.alineas_de_html     # sans réseau
         faux.resoudre = lambda code, article, date, exact=False: {
             "trouve": True, "exact": True, "id": "LEGIARTI000000000001", "num": article,
             "version_debut": "2017-03-01", "version_fin": None}
