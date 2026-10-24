@@ -344,8 +344,21 @@ def _articles_de_loda(obj, acc):
     return acc
 
 
-def resoudre_loi(nom, article, date):
+def _ecarter_inexact(r):
+    """`r` : la réponse de `resoudre` ou de `resoudre_loi`.
+    Remplace un résultat trouvé mais INEXACT (la cascade a rendu un autre article que celui
+    demandé) par un refus : `trouve` False, `exact` False, et le `num` et le `lien` de l'article
+    le plus proche. Tout autre résultat est rendu tel quel."""
+    if r.get("trouve") and not r.get("exact", True):
+        return {"code": r.get("code"), "article": r.get("article"), "date": r.get("date_demandee"),
+                "trouve": False, "exact": False, "num": r.get("num"), "lien": r.get("lien"),
+                "brut": None}
+    return r
+
+
+def resoudre_loi(nom, article, date, exact=False):
     """L'article d'une LOI (ou ordonnance, ou décret), et non d'un code.
+    Avec exact=True, un article autre que celui demandé est écarté (voir `_ecarter_inexact`).
 
     LE CONNECTEUR NE SAVAIT RÉSOUDRE QUE LES ARTICLES DE CODE. `resoudre` interroge le fonds
     CODE_DATE avec la facette NOM_CODE : par construction, un article de LOI n'y est jamais
@@ -387,29 +400,34 @@ def resoudre_loi(nom, article, date):
             # relevée par le rapporteur sur les articles 55-1 à 55-6 de la loi n° 2004-575. On
             # compare donc le numéro rendu au numéro demandé, comme le fait déjà `resoudre` pour
             # les codes, et l'appelant écarte ce qui n'est pas exact.
-            exact = _meme_article(article, a.get("num"))
-            return {
+            est_exact = _meme_article(article, a.get("num"))
+            r = {
                 "code": titre or nom, "article": article, "date_demandee": date, "trouve": True,
-                "exact": exact, "id": aid, "num": a.get("num"),
+                "exact": est_exact, "id": aid, "num": a.get("num"),
                 "alineas": alineas_de_html(html),
                 "texte": re.sub(r"<[^>]+>", " ", html).strip(),
                 "version_debut": _iso(a.get("dateDebut")), "version_fin": _iso(a.get("dateFin")),
                 "lien": ("https://www.legifrance.gouv.fr/loda/article_lc/%s" % aid) if aid
                         else ("https://www.legifrance.gouv.fr/loda/id/%s" % tid),
             }
+            return _ecarter_inexact(r) if exact else r
     return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
 
 
-def resoudre(code, article, date):
+def resoudre(code, article, date, exact=False):
     """Retourne l'article de <code> portant le n° <article>, dans sa version au <date>.
     Tolère les alias de codes (CESEDA, CGI, LPF...), le mot « article » ou « art. » devant le
     numéro et les suffixes d'alinéa (« 8° »).
+
+    Par défaut, un article autre que celui demandé, rendu par la cascade de `_art_candidates`,
+    est renvoyé avec `exact` False ; c'est à l'appelant de l'écarter ou de le retenir (CGI :
+    « 158-5-a » -> article 158). Avec exact=True, il est écarté ici (voir `_ecarter_inexact`).
 
     Si le texte visé n'est pas un code mais une LOI, la recherche est aiguillée vers le fonds
     LODA : les deux fonds sont distincts, et chercher un article de loi dans CODE_DATE ne rend
     jamais rien."""
     if not code_connu(code) and _RE_NUM_LOI.search(code or ""):
-        return resoudre_loi(code, article, date)
+        return resoudre_loi(code, article, date, exact=exact)
     code = _canon_code(code)
     for num in _art_candidates(article):
         payload = {"recherche": {
@@ -430,10 +448,10 @@ def resoudre(code, article, date):
         # sans le dire, et le rapporteur cliquait sur un lien pointant vers un AUTRE article — le
         # cas se présente à chaque fois qu'un projet CRÉE des articles. On compare donc le numéro
         # rendu au numéro demandé, et l'écart est signalé par `exact`.
-        exact = _meme_article(article, art.get("num"))
-        return {
+        est_exact = _meme_article(article, art.get("num"))
+        r = {
             "code": code, "article": article, "date_demandee": date, "trouve": True,
-            "exact": exact,
+            "exact": est_exact,
             "id": art.get("id") or ids[0],
             "num": art.get("num"),
             # LES ALINÉAS, pris de `texteHtml` : c'est la seule forme qui les porte. `texte` reste
@@ -445,6 +463,7 @@ def resoudre(code, article, date):
             "version_fin": _iso(art.get("dateFin")),
             "lien": f"https://www.legifrance.gouv.fr/codes/article_lc/{art.get('id') or ids[0]}",
         }
+        return _ecarter_inexact(r) if exact else r
     return {"code": code, "article": article, "date": date, "trouve": False, "brut": None}
 
 if __name__ == "__main__":
@@ -798,11 +817,19 @@ def historique_article(code, article, date=None):
     """HISTORIQUE des versions d'un article de code OU DE LOI : chaque version (dates, état) et le
     TEXTE qui l'a créée ou modifiée (intitulé, nature, date, lien Légifrance vérifié). Source :
     PISTE /consult/getArticle (champs articleVersions + lienModifications). Un texte désigné par
-    son numéro (« loi n° 78-17 ») passe par le fonds LODA, comme `resoudre_loi`."""
+    son numéro (« loi n° 78-17 ») passe par le fonds LODA, comme `resoudre_loi`.
+    Seul l'article demandé est retenu : si la cascade en rend un autre, la réponse porte `trouve`
+    False, `exact` False, et le `num` et le `lien` de l'article le plus proche."""
     d = date or datetime.date.today().strftime("%Y-%m-%d")
-    r = resoudre_loi(code, article, d) if _RE_NUM_LOI.search(code or "") else resoudre(code, article, d)
+    if _RE_NUM_LOI.search(code or ""):
+        r = resoudre_loi(code, article, d, exact=True)
+    else:
+        r = resoudre(code, article, d, exact=True)
     if not r.get("trouve") or not r.get("id"):
-        return {"trouve": False}
+        refus = {"trouve": False}
+        if r.get("exact") is False:
+            refus.update(exact=False, num=r.get("num"), lien=r.get("lien"))
+        return refus
     est_loi = "loda" in (r.get("lien") or "")
     try:
         art = (_post("/consult/getArticle", {"id": r["id"]}) or {}).get("article") or {}
