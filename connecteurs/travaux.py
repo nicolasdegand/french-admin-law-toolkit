@@ -15,16 +15,10 @@ try:
 except Exception:
     legifrance = None
 
+# Les appels à PISTE passent par `legifrance._post`, qui réessaie lui-même les erreurs passagères
+# (429, 5xx, réseau) et remonte aussitôt les erreurs définitives (400, 403...) : pas de second
+# mécanisme de réessai ici.
 
-import time as _time
-def _retry(fn, n=3):
-    last=None
-    for i in range(n):
-        try:
-            return fn()
-        except Exception as e:
-            last=e; _time.sleep(1.2*(i+1))
-    raise last
 
 def _clean(html):
     """Texte lisible d'un champ HTML de PISTE (travaux préparatoires, exposé des motifs, nota) :
@@ -112,7 +106,7 @@ def travaux_pour_article(code, article, date):
                 "message": "Version de l'article non résolue à cette date."}
     version = f'{r.get("version_debut")} → {r.get("version_fin") or "en cours"}'
     try:
-        art = _retry(lambda: legifrance._post("/consult/getArticle", {"id": r["id"]})).get("article", {})
+        art = legifrance._post("/consult/getArticle", {"id": r["id"]}).get("article", {})
     except Exception as e:
         return {"trouve": False, "article": article, "code": code, "version": version,
                 "panne": legifrance._panne(e), "message": _MESSAGE_PANNE}
@@ -138,7 +132,7 @@ def travaux_pour_article(code, article, date):
     nature = cree.get("natureText")
     titre = cree.get("textTitle")
     try:
-        js = _retry(lambda: legifrance._post("/consult/jorf", {"textCid": cid}))
+        js = legifrance._post("/consult/jorf", {"textCid": cid})
         nature = js.get("nature") or nature
         titre = js.get("title") or titre
         prep = _clean(js.get("prepWork"))
@@ -201,8 +195,7 @@ def dossier_pieces(dole_id, max_pieces=40):
     if not legifrance or not dole_id:
         return {"pieces": [], "expose_motif": None}
     try:
-        d = _retry(lambda: legifrance._post("/consult/dossierLegislatif",
-                                            {"id": dole_id})).get("dossierLegislatif", {})
+        d = legifrance._post("/consult/dossierLegislatif", {"id": dole_id}).get("dossierLegislatif", {})
     except Exception as e:
         return {"pieces": [], "expose_motif": None, "panne": legifrance._panne(e)}
     pieces = _pieces_from_arbo(d.get("arborescence") or {})
