@@ -253,6 +253,36 @@ class Pannes(unittest.TestCase):
         self.assertEqual(legifrance.DERNIERE_PANNE["nombre"], 2)
 
 
+class DateDeFin(unittest.TestCase):
+    """_iso_fin : la date conventionnelle du 1er janvier 2999 (et au-delà) veut dire « pas de fin »."""
+
+    def test_date_sans_terme(self):
+        for date in ("2999-01-01", "2999-12-31", "3000-01-01"):
+            with self.subTest(date=date):
+                self.assertIsNone(legifrance._iso_fin(legifrance._ms(date)))
+        self.assertEqual(legifrance._ms("2999-01-01"), 32472144000000)
+
+    def test_vraies_dates_conservees(self):
+        for date in ("2027-01-01", "2023-03-12", "2998-12-31"):
+            with self.subTest(date=date):
+                self.assertEqual(legifrance._iso_fin(legifrance._ms(date)), date)
+
+    def test_date_absente(self):
+        self.assertIsNone(legifrance._iso_fin(None))
+
+    def test_resoudre_version_en_vigueur(self):
+        def faux_post(chemin, charge):
+            if chemin == "/search":
+                return {"results": [{"id": "LEGIARTI000000000001"}]}
+            return {"article": {"id": charge["id"], "num": "L181-18", "texte": "Texte.",
+                                "dateDebut": legifrance._ms("2023-03-12"), "dateFin": 32472144000000}}
+        with mock.patch.object(legifrance, "_CODES_MAP", {"code de l'environnement": "Code de l'environnement"}), \
+             mock.patch.object(legifrance, "_post", faux_post):
+            r = legifrance.resoudre("Code de l'environnement", "L. 181-18", "2024-03-15")
+        self.assertEqual(r["version_debut"], "2023-03-12")
+        self.assertIsNone(r["version_fin"])
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
