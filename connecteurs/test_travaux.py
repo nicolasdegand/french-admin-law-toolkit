@@ -186,6 +186,30 @@ class Pannes(unittest.TestCase):
         self.assertEqual(r["pieces"], [])
 
 
+class VersionEnCours(unittest.TestCase):
+    """Une version en vigueur s'affiche « → en cours », et non « → 2999-01-01 » (L6).
+
+    Le vrai `legifrance.resoudre`, PISTE seul simulé ; identifiants et textes fictifs."""
+
+    def travaux(self, date_fin):
+        legifrance = travaux.legifrance
+        article = {"id": "LEGIARTI000000000001", "num": "L181-18", "texte": "Texte.",
+                   "dateDebut": legifrance._ms("2023-03-12"), "dateFin": date_fin,
+                   "lienModifications": Pannes.REPONSES["/consult/getArticle"]["article"]["lienModifications"]}
+        reponses = dict(Pannes.REPONSES, **{"/search": {"results": [{"id": "LEGIARTI000000000001"}]},
+                                            "/consult/getArticle": {"article": article}})
+        with mock.patch.object(legifrance, "_CODES_MAP", {"code de l'environnement": "Code de l'environnement"}), \
+             mock.patch.object(legifrance, "_post", lambda chemin, charge: reponses[chemin]):
+            return travaux.travaux_pour_article("Code de l'environnement", "L. 181-18", "2024-03-15")
+
+    def test_version_sans_terme(self):
+        self.assertEqual(self.travaux(32472144000000)["version"], "2023-03-12 → en cours")
+
+    def test_version_close(self):
+        fin = travaux.legifrance._ms("2025-01-01")
+        self.assertEqual(self.travaux(fin)["version"], "2023-03-12 → 2025-01-01")
+
+
 class TextesDecodes(unittest.TestCase):
     """_clean : un alinéa par ligne, entités HTML décodées. Extraits fictifs."""
 
