@@ -283,6 +283,24 @@ class DateDeFin(unittest.TestCase):
         self.assertIsNone(r["version_fin"])
 
 
+class ConversionDesDates(unittest.TestCase):
+    """_iso : millisecondes -> date, sans `utcfromtimestamp` (obsolète) ni limite de plateforme."""
+
+    def test_dates(self):
+        for date in ("2024-03-15", "1970-01-02", "1804-03-21", "2999-01-01"):
+            with self.subTest(date=date):
+                self.assertEqual(legifrance._iso(legifrance._ms(date)), date)
+
+    def test_date_absente(self):
+        self.assertIsNone(legifrance._iso(None))
+
+    def test_sans_avertissement_d_obsolescence(self):
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("error", DeprecationWarning)
+            legifrance._iso(legifrance._ms("2024-03-15"))
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""

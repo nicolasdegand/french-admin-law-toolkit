@@ -171,9 +171,15 @@ def alineas_de_html(html):
 def _ms(date):  # 'YYYY-MM-DD' -> ms epoch
     return int(datetime.datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=datetime.timezone.utc).timestamp() * 1000)
 
+_EPOQUE = datetime.datetime(1970, 1, 1, tzinfo=datetime.timezone.utc)
+
+
 def _iso(ms):
+    """ms epoch -> 'YYYY-MM-DD'. Calculé à partir de l'époque Unix, et non par `utcfromtimestamp`
+    (obsolète depuis Python 3.12) ou `fromtimestamp` (dépendant de la plateforme, souvent limité
+    à 1970-2038) : Légifrance rend des dates antérieures à 1970 (code civil : 1804)."""
     if not ms: return None
-    return datetime.datetime.utcfromtimestamp(ms/1000).strftime("%Y-%m-%d")
+    return (_EPOQUE + datetime.timedelta(milliseconds=ms)).strftime("%Y-%m-%d")
 
 
 # ==================================================================================================
