@@ -185,6 +185,40 @@ class Pannes(unittest.TestCase):
         self.assertEqual(r["pieces"], [])
 
 
+class Avertissements(unittest.TestCase):
+    """Texte créateur ordonnance ou codification : un avertissement dit où chercher. Titres fictifs."""
+
+    def test_nature_et_titre(self):
+        cas = [
+            ("LOI", "Loi fictive relative à l'environnement", []),
+            ("ORDONNANCE", "Ordonnance fictive relative à l'autorisation", [travaux._AVERTISSEMENT_ORDONNANCE]),
+            ("ordonnance", "", [travaux._AVERTISSEMENT_ORDONNANCE]),
+            (None, "Ordonnance n° 0000-0 fictive", [travaux._AVERTISSEMENT_ORDONNANCE]),
+            ("LOI", "Loi fictive portant codification de dispositions", [travaux._AVERTISSEMENT_CODIFICATION]),
+            ("ORDONNANCE", "Ordonnance fictive relative à la partie législative du code de l'exemple",
+             [travaux._AVERTISSEMENT_ORDONNANCE, travaux._AVERTISSEMENT_CODIFICATION]),
+            ("LOI", "Loi fictive modifiant le code de l'exemple", []),
+            (None, None, []),
+        ]
+        for nature, titre, attendu in cas:
+            with self.subTest(nature=nature, titre=titre):
+                self.assertEqual(travaux._avertissements(nature, titre), attendu)
+
+    def travaux(self, nature, titre):
+        reponses = dict(Pannes.REPONSES)
+        reponses["/consult/jorf"] = dict(reponses["/consult/jorf"], nature=nature, title=titre)
+        with mock.patch.object(travaux.legifrance, "resoudre", return_value=Pannes.TROUVE), \
+             mock.patch.object(travaux.legifrance, "_post", lambda chemin, charge: reponses[chemin]):
+            return travaux.travaux_pour_article("Code de l'environnement", "L. 181-18-1", "2024-03-15")
+
+    def test_reponse_ordonnance(self):
+        r = self.travaux("ORDONNANCE", "Ordonnance fictive relative à l'autorisation")
+        self.assertEqual(r["avertissement"], travaux._AVERTISSEMENT_ORDONNANCE)
+
+    def test_reponse_loi(self):
+        self.assertNotIn("avertissement", self.travaux("LOI", "Loi fictive"))
+
+
 class Reessais(unittest.TestCase):
     """Les réessais sont ceux de `legifrance._post` seul : 4 requêtes pour une erreur passagère,
     1 pour une erreur définitive, aucune pause propre à travaux.py.
