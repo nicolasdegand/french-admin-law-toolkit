@@ -101,5 +101,84 @@ class ArticleInexact(unittest.TestCase):
         self.assertEqual(r["lien"], self.LIEN)
 
 
+class Pannes(unittest.TestCase):
+    """Une panne de PISTE, à chacun des quatre appels, est signalée par le champ `panne`.
+
+    `legifrance.resoudre` et `legifrance._post` sont remplacés par des substituts, les pauses de
+    `_retry` sont neutralisées ; identifiants, titres et liens fictifs."""
+
+    TROUVE = {"trouve": True, "exact": True, "id": "LEGIARTI000000000001", "num": "L181-18-1",
+              "version_debut": "2017-03-01", "version_fin": None,
+              "lien": "https://www.legifrance.gouv.fr/codes/article_lc/LEGIARTI000000000001"}
+    REPONSES = {
+        "/consult/getArticle": {"article": {"lienModifications": [
+            {"linkType": "CREE", "textCid": "JORFTEXT000000000005", "textTitle": "Loi fictive",
+             "natureText": "LOI", "datePubliTexte": "2017-01-01"}]}},
+        "/consult/jorf": {"nature": "LOI", "title": "Loi fictive", "prepWork": "<p>Travaux</p>",
+                          "dossiersLegislatifs": [{"id": "JORFDOLE000000000006"}]},
+        "/consult/dossierLegislatif": {"dossierLegislatif": {
+            "arborescence": {"niveaux": [{"libelle": "Assemblée nationale",
+                                          "liens": [{"libelle": "Rapport", "lien": "https://exemple.invalid/rapport"}]}]},
+            "exposeMotif": "<p>Motifs</p>"}},
+    }
+
+    def setUp(self):
+        for patch in (mock.patch.object(travaux._time, "sleep"),
+                      mock.patch.dict(travaux.legifrance.DERNIERE_PANNE,
+                                      {"quand": None, "quoi": None, "nombre": 0})):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def travaux(self, chemin_en_panne=None, resoudre=None):
+        def faux_post(chemin, charge):
+            if chemin == chemin_en_panne:
+                raise RuntimeError("503 Service Unavailable")
+            return self.REPONSES[chemin]
+        resoudre = resoudre or mock.Mock(return_value=self.TROUVE)
+        with mock.patch.object(travaux.legifrance, "resoudre", resoudre), \
+             mock.patch.object(travaux.legifrance, "_post", faux_post):
+            return travaux.travaux_pour_article("Code de l'environnement", "L. 181-18-1", "2024-03-15")
+
+    def test_sans_panne(self):
+        r = self.travaux()
+        self.assertTrue(r["trouve"])
+        self.assertNotIn("panne", r)
+        self.assertEqual(r["travaux_preparatoires"], "Travaux")
+        self.assertEqual(len(r["pieces"]), 1)
+        self.assertEqual(r["expose_motif"], "Motifs")
+
+    def test_panne_resolution_exception(self):
+        r = self.travaux(resoudre=mock.Mock(side_effect=RuntimeError("503 Service Unavailable")))
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+        self.assertEqual(r["message"], travaux._MESSAGE_PANNE)
+
+    def test_panne_resolution_signalee(self):
+        r = self.travaux(resoudre=mock.Mock(return_value={"trouve": False, "panne": "503 Service Unavailable"}))
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+        self.assertEqual(r["message"], travaux._MESSAGE_PANNE)
+
+    def test_panne_article(self):
+        r = self.travaux("/consult/getArticle")
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+        self.assertIn("version", r)
+
+    def test_panne_texte(self):
+        r = self.travaux("/consult/jorf")
+        self.assertTrue(r["trouve"])
+        self.assertIn("503", r["panne"])
+        self.assertEqual(r["travaux_preparatoires"], "")
+        self.assertEqual(r["pieces"], [])
+
+    def test_panne_dossier(self):
+        r = self.travaux("/consult/dossierLegislatif")
+        self.assertTrue(r["trouve"])
+        self.assertIn("503", r["panne"])
+        self.assertEqual(r["travaux_preparatoires"], "Travaux")
+        self.assertEqual(r["pieces"], [])
+
+
 if __name__ == "__main__":
     unittest.main()
