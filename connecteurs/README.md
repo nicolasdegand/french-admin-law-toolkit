@@ -120,6 +120,24 @@ une QPC est-elle pendante sur cette disposition ? Le tableau évolue en
 permanence, il faut le rafraîchir. Le fichier est écrit dans le dossier du
 module, ou dans celui que désigne `CONSTIT_DOSSIER`.
 
+## Tests et démonstrations
+
+Les fichiers `test_*.py` vérifient les modules sans réseau ni identifiants
+PISTE : les réponses des services interrogés y sont simulées. Depuis la racine
+du dépôt :
+
+```
+python -m unittest discover -s connecteurs -v
+```
+
+Lancé directement (`python legifrance.py`, par exemple), un module exécute la
+démonstration placée sous `if __name__ == "__main__":`, qui interroge réellement
+les sources. **Ce bloc doit rester à la fin du fichier.** Python exécute un
+fichier de haut en bas : une fonction définie après la démonstration n'existe
+pas encore quand celle-ci s'exécute, et le lancement direct échoue alors que
+l'import du module fonctionne. Les fichiers de test le vérifient pour les
+modules qu'ils couvrent.
+
 ## Ce qui n'est pas ici
 
 Il n'y a pas de connecteur vers l'interface de recherche du site du Conseil

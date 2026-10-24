@@ -123,6 +123,23 @@ constitutionnalité*, QPC) pending on this provision? The table changes
 constantly and must be refreshed. The file is written in the module's folder, or
 in the one designated by `CONSTIT_DOSSIER`.
 
+## Tests and demonstrations
+
+The `test_*.py` files check the modules without network access or PISTE
+credentials: the responses of the services queried are simulated. From the
+repository root:
+
+```
+python -m unittest discover -s connecteurs -v
+```
+
+Run directly (`python legifrance.py`, for example), a module executes the
+demonstration placed under `if __name__ == "__main__":`, which queries the
+sources for real. **This block must stay at the end of the file.** Python runs a
+file from top to bottom: a function defined after the demonstration does not
+exist yet when it runs, and direct execution fails even though importing the
+module works. The test files check this for the modules they cover.
+
 ## What is not here
 
 There is no connector to the search interface of the Council of State (*Conseil
