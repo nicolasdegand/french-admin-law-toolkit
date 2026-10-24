@@ -83,15 +83,18 @@ STATS = {}
 #
 # On enregistre donc la dernière panne, et les fonctions la reportent dans leur réponse.
 # ==================================================================================================
-DERNIERE_PANNE = {"quand": None, "quoi": None}
+DERNIERE_PANNE = {"quand": None, "quoi": None, "nombre": 0}
 
 
 def _panne(e):
-    """Mémorise une panne technique et dit si elle relève de l'authentification."""
+    """Mémorise une panne technique et dit si elle relève de l'authentification.
+    `nombre` compte les pannes : comparé avant et après un appel, il dit si une panne est
+    survenue pendant cet appel, même dans la même seconde qu'une précédente."""
     import time as _t
     msg = str(e)[:300]
     DERNIERE_PANNE["quand"] = _t.strftime("%Y-%m-%d %H:%M:%S")
     DERNIERE_PANNE["quoi"] = msg
+    DERNIERE_PANNE["nombre"] += 1
     return msg
 
 
@@ -359,6 +362,7 @@ def _ecarter_inexact(r):
 def resoudre_loi(nom, article, date, exact=False):
     """L'article d'une LOI (ou ordonnance, ou décret), et non d'un code.
     Avec exact=True, un article autre que celui demandé est écarté (voir `_ecarter_inexact`).
+    Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident).
 
     LE CONNECTEUR NE SAVAIT RÉSOUDRE QUE LES ARTICLES DE CODE. `resoudre` interroge le fonds
     CODE_DATE avec la facette NOM_CODE : par construction, un article de LOI n'y est jamais
@@ -373,17 +377,21 @@ def resoudre_loi(nom, article, date, exact=False):
     m = _RE_NUM_LOI.search(nom or "")
     if not m:
         return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
+    pannes_avant = DERNIERE_PANNE["nombre"]
     tid, titre = _legitext_loi(m.group(1).replace("‑", "-"))
     if not tid:
-        return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
+        refus = {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
+        if DERNIERE_PANNE["nombre"] != pannes_avant:      # loi non identifiée faute de réponse
+            refus["panne"] = DERNIERE_PANNE["quoi"]
+        return refus
     ck = (tid, _ms(date))
     r = _TOC_CACHE.get(ck)
     if r is None:
         try:
             r = _post("/consult/legiPart", {"textId": tid, "date": _ms(date)})
         except Exception as e:
-            _panne(e)
-            return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
+            return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None,
+                    "panne": _panne(e)}
         if len(_TOC_CACHE) > 40:
             _TOC_CACHE.clear()
         _TOC_CACHE[ck] = r
@@ -659,7 +667,8 @@ def _legitext_code(code):
         "pageNumber": 1, "pageSize": 5, "operateur": "ET", "typePagination": "DEFAUT"}, "fond": "CODE_DATE"}
     try:
         js = _post("/search", payload)
-    except Exception:
+    except Exception as e:
+        _panne(e)          # ne pas confondre « rien trouvé » et « je n'ai pas pu chercher »
         return None
     ids = _find_any_id(js, ["LEGITEXT"])
     return re.sub(r"_.*", "", ids[0]) if ids else None
@@ -754,7 +763,7 @@ def resoudre_subdivision(parent_kind, parent_key, chemin, date=None):
     if not chemin:
         return {"trouve": False}
     date = date or datetime.datetime.now().strftime("%Y-%m-%d")
-    _av = DERNIERE_PANNE.get("quand")
+    _av = DERNIERE_PANNE.get("nombre")
     if parent_kind == "code":
         tid = _legitext_code(parent_key); base = "codes"
     else:
@@ -762,7 +771,7 @@ def resoudre_subdivision(parent_kind, parent_key, chemin, date=None):
     if not tid:
         # Le texte n'a pas été identifié : est-ce parce qu'il n'existe pas, ou parce que la
         # recherche a échoué ? On le dit, au lieu de laisser croire à une absence.
-        if DERNIERE_PANNE.get("quand") != _av:
+        if DERNIERE_PANNE.get("nombre") != _av:
             return {"trouve": False, "panne": DERNIERE_PANNE.get("quoi")}
         return {"trouve": False}
     # LA TABLE DES MATIÈRES D'UN CODE NE SE TÉLÉCHARGE QU'UNE FOIS.
@@ -819,7 +828,9 @@ def historique_article(code, article, date=None):
     PISTE /consult/getArticle (champs articleVersions + lienModifications). Un texte désigné par
     son numéro (« loi n° 78-17 ») passe par le fonds LODA, comme `resoudre_loi`.
     Seul l'article demandé est retenu : si la cascade en rend un autre, la réponse porte `trouve`
-    False, `exact` False, et le `num` et le `lien` de l'article le plus proche."""
+    False, `exact` False, et le `num` et le `lien` de l'article le plus proche.
+    Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident) ; une version
+    dont le texte modificateur n'a pu être lu garde `modif` à None."""
     d = date or datetime.date.today().strftime("%Y-%m-%d")
     if _RE_NUM_LOI.search(code or ""):
         r = resoudre_loi(code, article, d, exact=True)
@@ -829,14 +840,17 @@ def historique_article(code, article, date=None):
         refus = {"trouve": False}
         if r.get("exact") is False:
             refus.update(exact=False, num=r.get("num"), lien=r.get("lien"))
+        if r.get("panne"):
+            refus["panne"] = r["panne"]
         return refus
     est_loi = "loda" in (r.get("lien") or "")
     try:
         art = (_post("/consult/getArticle", {"id": r["id"]}) or {}).get("article") or {}
-    except Exception:
-        return {"trouve": False}
+    except Exception as e:
+        return {"trouve": False, "panne": _panne(e)}
     versions = art.get("articleVersions") or []
     out = []
+    panne = None
     for v in versions:
         vid = v.get("id")
         modif = None
@@ -850,17 +864,21 @@ def historique_article(code, article, date=None):
                          "nature": s.get("natureText"), "sens": s.get("linkType"),
                          "date": s.get("datePubliTexte") or s.get("dateSignaTexte"),
                          "lien": _lien_texte(s.get("textCid"))}
-        except Exception:
-            pass
+        except Exception as e:
+            panne = _panne(e)
         out.append({"version": v.get("version"), "debut": _iso(v.get("dateDebut")),
                     "fin": _iso(v.get("dateFin")), "etat": v.get("etat"),
                     "lien_version": ("https://www.legifrance.gouv.fr/%s/article_lc/%s"
                                      % ("loda" if est_loi else "codes", vid)) if vid else None,
                     "modif": modif})
     out.sort(key=lambda x: x.get("debut") or "")
-    return {"trouve": True, "code": r.get("code") or code, "article": r.get("num") or article, "cid": art.get("cid"),
-            "lien": r.get("lien"), "texte_actuel": re.sub(r"<[^>]+>", " ", (art.get("texte") or ""))[:900].strip(),
-            "versions": out}
+    reponse = {"trouve": True, "code": r.get("code") or code, "article": r.get("num") or article,
+               "cid": art.get("cid"), "lien": r.get("lien"),
+               "texte_actuel": re.sub(r"<[^>]+>", " ", (art.get("texte") or ""))[:900].strip(),
+               "versions": out}
+    if panne:
+        reponse["panne"] = panne
+    return reponse
 
 
 # ==================================================================================================
