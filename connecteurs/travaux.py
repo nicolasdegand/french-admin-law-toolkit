@@ -35,9 +35,22 @@ def _clean(html):
     return t.strip()
 
 
+_RE_REGLEMENTAIRE = re.compile(r"""
+    \s*
+    (?:l['’]\s*)?               # « l'article »
+    (?:art(?:icle)?s?\.?\s*)?   # « article », « art. », en toutes casses
+    [RD]                        # le préfixe, R ou D
+    (?![^\W\d_])                # non suivi d'une lettre (écarte « Règlement »)
+    """, re.IGNORECASE | re.VERBOSE)
+
+
 def _est_reglementaire(article):
-    a = (article or "").strip().lstrip("aArTicle. ").strip()
-    return a[:1].upper() in ("R", "D")
+    """Vrai si l'article désigné est réglementaire, c'est-à-dire si son numéro commence par R ou D.
+    Le préfixe peut être en minuscule et précédé de « article », « art. » ou « l'article » :
+    « R. 181-28 », « Article R. 181-28 », « art. r. 181-28 », « D. 123-1 », « R* 122-1 ».
+    Un R ou un D suivi d'une lettre (« Règlement », « Décret ») n'est pas un préfixe.
+    Un article de décret non codifié, sans préfixe, n'est pas reconnu."""
+    return bool(_RE_REGLEMENTAIRE.match(article or ""))
 
 
 def _lien_dossier(idd):
