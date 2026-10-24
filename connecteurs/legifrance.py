@@ -474,22 +474,6 @@ def resoudre(code, article, date, exact=False):
         return _ecarter_inexact(r) if exact else r
     return {"code": code, "article": article, "date": date, "trouve": False, "brut": None}
 
-if __name__ == "__main__":
-    import sys
-    code = sys.argv[1] if len(sys.argv) > 1 else "Code de l'environnement"
-    article = sys.argv[2] if len(sys.argv) > 2 else "R. 122-5"
-    date = sys.argv[3] if len(sys.argv) > 3 else "2016-07-08"
-    try:
-        r = resoudre(code, article, date)
-    except Exception as e:
-        print("ERREUR:", e); sys.exit(1)
-    if not r["trouve"]:
-        print("Article non trouvé. Réponse brute (début):", json.dumps(r["brut"], ensure_ascii=False)[:600]); sys.exit(0)
-    print(f"{r['num']} — {code}")
-    print(f"Version en vigueur : {r['version_debut']} → {r['version_fin'] or '(en cours)'} (demandé au {date})")
-    print(f"Lien : {r['lien']}")
-    print("Texte (400 c.) :", r["texte"][:400].replace("\n", " "))
-
 
 # ---------- jurisprudence constitutionnelle (fonds CONSTIT) ----------
 def _lien_cc(titre):
@@ -924,3 +908,23 @@ if _CD is not None:
     resoudre = _avec_cache_disque("lf_resoudre", resoudre, 2)
     resoudre_loi = _avec_cache_disque("lf_resoudre_loi", resoudre_loi, 2)
     resoudre_subdivision = _avec_cache_disque("lf_resoudre_subdivision", resoudre_subdivision, 3)
+
+
+# Démonstration, exécutée seulement au lancement direct (`python legifrance.py [code] [article] [date]`).
+# À GARDER EN FIN DE FICHIER : Python exécute le fichier de haut en bas, et une fonction définie plus
+# bas n'existerait pas encore au moment de la démonstration (vérifié par test_legifrance.py).
+if __name__ == "__main__":
+    import sys
+    code = sys.argv[1] if len(sys.argv) > 1 else "Code de l'environnement"
+    article = sys.argv[2] if len(sys.argv) > 2 else "R. 122-5"
+    date = sys.argv[3] if len(sys.argv) > 3 else "2016-07-08"
+    try:
+        r = resoudre(code, article, date)
+    except Exception as e:
+        print("ERREUR:", e); sys.exit(1)
+    if not r["trouve"]:
+        print("Article non trouvé. Réponse brute (début):", json.dumps(r["brut"], ensure_ascii=False)[:600]); sys.exit(0)
+    print(f"{r['num']} — {code}")
+    print(f"Version en vigueur : {r['version_debut']} → {r['version_fin'] or '(en cours)'} (demandé au {date})")
+    print(f"Lien : {r['lien']}")
+    print("Texte (400 c.) :", r["texte"][:400].replace("\n", " "))
