@@ -11,6 +11,7 @@ import runpy
 import sys
 import types
 import unittest
+import urllib.error
 from unittest import mock
 
 import travaux
@@ -110,8 +111,8 @@ class ArticleInexact(unittest.TestCase):
 class Pannes(unittest.TestCase):
     """Une panne de PISTE, à chacun des quatre appels, est signalée par le champ `panne`.
 
-    `legifrance.resoudre` et `legifrance._post` sont remplacés par des substituts, les pauses de
-    `_retry` sont neutralisées ; identifiants, titres et liens fictifs."""
+    `legifrance.resoudre` et `legifrance._post` sont remplacés par des substituts ;
+    identifiants, titres et liens fictifs."""
 
     TROUVE = {"trouve": True, "exact": True, "id": "LEGIARTI000000000001", "num": "L181-18-1",
               "version_debut": "2017-03-01", "version_fin": None,
@@ -129,11 +130,9 @@ class Pannes(unittest.TestCase):
     }
 
     def setUp(self):
-        for patch in (mock.patch.object(travaux._time, "sleep"),
-                      mock.patch.dict(travaux.legifrance.DERNIERE_PANNE,
-                                      {"quand": None, "quoi": None, "nombre": 0})):
-            patch.start()
-            self.addCleanup(patch.stop)
+        patch = mock.patch.dict(travaux.legifrance.DERNIERE_PANNE, {"quand": None, "quoi": None, "nombre": 0})
+        patch.start()
+        self.addCleanup(patch.stop)
 
     def travaux(self, chemin_en_panne=None, resoudre=None):
         def faux_post(chemin, charge):
@@ -184,6 +183,44 @@ class Pannes(unittest.TestCase):
         self.assertIn("503", r["panne"])
         self.assertEqual(r["travaux_preparatoires"], "Travaux")
         self.assertEqual(r["pieces"], [])
+
+
+class Reessais(unittest.TestCase):
+    """Les réessais sont ceux de `legifrance._post` seul : 4 requêtes pour une erreur passagère,
+    1 pour une erreur définitive, aucune pause propre à travaux.py.
+
+    `urllib.request.urlopen` est remplacé par un substitut qui répond toujours par l'erreur HTTP
+    choisie ; `legifrance.token` et `time.sleep` aussi : ni réseau, ni attente."""
+
+    def lire_article(self, code_http):
+        requetes, pauses = [], []
+
+        def urlopen(requete, timeout=None):
+            requetes.append(requete.full_url)
+            raise urllib.error.HTTPError(requete.full_url, code_http, "simulé", {}, io.BytesIO(b""))
+        with mock.patch.object(travaux.legifrance, "resoudre", return_value=Pannes.TROUVE), \
+             mock.patch.object(travaux.legifrance, "token", return_value="jeton fictif"), \
+             mock.patch("urllib.request.urlopen", urlopen), \
+             mock.patch("time.sleep", pauses.append), \
+             mock.patch.dict(travaux.legifrance.DERNIERE_PANNE, {"quand": None, "quoi": None, "nombre": 0}):
+            r = travaux.travaux_pour_article("Code de l'environnement", "L. 181-18-1", "2024-03-15")
+        return r, requetes, pauses
+
+    def test_erreur_passagere(self):
+        for code_http in (503, 429):
+            with self.subTest(code_http=code_http):
+                r, requetes, pauses = self.lire_article(code_http)
+                self.assertEqual(len(requetes), 4)
+                self.assertEqual(pauses, [1.0, 2.0, 4.0])
+                self.assertIn(str(code_http), r["panne"])
+
+    def test_erreur_definitive(self):
+        for code_http in (403, 400):
+            with self.subTest(code_http=code_http):
+                r, requetes, pauses = self.lire_article(code_http)
+                self.assertEqual(len(requetes), 1)
+                self.assertEqual(pauses, [])
+                self.assertIn(str(code_http), r["panne"])
 
 
 class DateInvalide(unittest.TestCase):
