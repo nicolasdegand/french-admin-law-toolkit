@@ -73,8 +73,14 @@ def travaux_pour_article(code, article, date):
     if _est_reglementaire(article):
         return {"trouve": False, "reglementaire": True, "article": article, "code": code,
                 "message": "Disposition réglementaire : pas de travaux parlementaires."}
-    r = legifrance.resoudre(code, article, date)
+    # exact=True : un autre article que celui demandé (« L. 181-18 » pour « L. 181-18-1 ») est
+    # écarté par legifrance.py, qui rend alors `exact` False, et le `num` et le `lien` du plus proche.
+    r = legifrance.resoudre(code, article, date, exact=True)
     if not r.get("trouve"):
+        if r.get("exact") is False:
+            return {"trouve": False, "exact": False, "article": article, "code": code,
+                    "num": r.get("num"), "lien": r.get("lien"),
+                    "message": f"Article introuvable à cette date ; l'article le plus proche est {r.get('num')}."}
         return {"trouve": False, "article": article, "code": code,
                 "message": "Version de l'article non résolue à cette date."}
     version = f'{r.get("version_debut")} → {r.get("version_fin") or "en cours"}'
