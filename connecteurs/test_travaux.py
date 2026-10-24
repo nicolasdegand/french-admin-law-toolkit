@@ -186,6 +186,41 @@ class Pannes(unittest.TestCase):
         self.assertEqual(r["pieces"], [])
 
 
+class DateInvalide(unittest.TestCase):
+    """Une date invalide est refusée d'emblée, avec un message clair, sans être prise pour une
+    panne de PISTE et sans aucun appel. `resoudre` et `_post` sont remplacés par des substituts."""
+
+    INVALIDES = ["15/03/2024", "2024-02-30", "", None, "2024-13-01", "15 mars 2024"]
+
+    def test_date_valide(self):
+        for date in ("2024-03-15", "2024-3-15", "2024-02-29"):
+            with self.subTest(date=date):
+                self.assertTrue(travaux._date_valide(date))
+        for date in self.INVALIDES:
+            with self.subTest(date=date):
+                self.assertFalse(travaux._date_valide(date))
+
+    def test_refus_sans_appel(self):
+        for article in ("L. 181-18", "R. 181-28"):
+            for date in self.INVALIDES:
+                with self.subTest(article=article, date=date), \
+                     mock.patch.object(travaux.legifrance, "resoudre") as resoudre, \
+                     mock.patch.object(travaux.legifrance, "_post") as post:
+                    r = travaux.travaux_pour_article("Code de l'environnement", article, date)
+                    self.assertFalse(r["trouve"])
+                    self.assertTrue(r["date_invalide"])
+                    self.assertNotIn("panne", r)
+                    self.assertIn("AAAA-MM-JJ", r["message"])
+                    resoudre.assert_not_called()
+                    post.assert_not_called()
+
+    def test_date_valide_poursuivie(self):
+        with mock.patch.object(travaux.legifrance, "resoudre", return_value={"trouve": False}) as resoudre:
+            r = travaux.travaux_pour_article("Code de l'environnement", "L. 181-18", "2024-3-15")
+        resoudre.assert_called_once()
+        self.assertNotIn("date_invalide", r)
+
+
 class VersionEnCours(unittest.TestCase):
     """Une version en vigueur s'affiche « → en cours », et non « → 2999-01-01 » (L6).
 
