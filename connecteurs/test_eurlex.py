@@ -4,6 +4,7 @@
 Lancement, depuis la racine du dépôt :
     python -m unittest discover -s connecteurs -v
 """
+import ast
 import io
 import json
 import socket
@@ -68,6 +69,17 @@ class Reponses(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", reponse_sparql([])):
             r = eurlex.chercher("durée de conservation des données au regard du RGPD")
         self.assertEqual(r[0]["celex"], "32016R0679")
+
+
+class Structure(unittest.TestCase):
+    """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
+    une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
+
+    def test_demonstration_en_fin_de_fichier(self):
+        with open(eurlex.__file__, encoding="utf-8") as f:
+            derniere = ast.parse(f.read()).body[-1]
+        self.assertIsInstance(derniere, ast.If)
+        self.assertIn("__main__", ast.unparse(derniere.test))
 
 
 if __name__ == "__main__":
