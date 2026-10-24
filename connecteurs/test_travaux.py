@@ -4,6 +4,12 @@
 Lancement, depuis la racine du dépôt :
     python -m unittest discover -s connecteurs -v
 """
+import ast
+import contextlib
+import io
+import runpy
+import sys
+import types
 import unittest
 from unittest import mock
 
@@ -178,6 +184,30 @@ class Pannes(unittest.TestCase):
         self.assertIn("503", r["panne"])
         self.assertEqual(r["travaux_preparatoires"], "Travaux")
         self.assertEqual(r["pieces"], [])
+
+
+class Demonstration(unittest.TestCase):
+    """Le lancement direct (`python travaux.py`) exécute la démonstration jusqu'au bout."""
+
+    def test_demonstration_en_fin_de_fichier(self):
+        with open(travaux.__file__, encoding="utf-8") as f:
+            derniere = ast.parse(f.read()).body[-1]
+        self.assertIsInstance(derniere, ast.If)
+        self.assertIn("__main__", ast.unparse(derniere.test))
+
+    def test_lancement_direct(self):
+        """travaux.py est exécuté comme un script, avec un faux module `legifrance` qui répond
+        comme PISTE et trouve un dossier législatif : la démonstration va jusqu'à `dossier_pieces`."""
+        faux = types.ModuleType("legifrance")
+        faux._panne = str
+        faux.resoudre = lambda code, article, date, exact=False: {
+            "trouve": True, "exact": True, "id": "LEGIARTI000000000001", "num": article,
+            "version_debut": "2017-03-01", "version_fin": None}
+        faux._post = lambda chemin, charge: Pannes.REPONSES[chemin]
+        sortie = io.StringIO()
+        with mock.patch.dict(sys.modules, {"legifrance": faux}), contextlib.redirect_stdout(sortie):
+            runpy.run_path(travaux.__file__, run_name="__main__")
+        self.assertIn("Rapport", sortie.getvalue())
 
 
 if __name__ == "__main__":
