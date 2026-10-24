@@ -8,6 +8,7 @@ travaux préparatoires (prepWork), qui recensent les pièces Assemblée national
 et Sénat. Ne vaut que pour les dispositions législatives ; un article
 réglementaire (R./D.) n'a pas de travaux parlementaires.
 """
+import datetime
 import re
 try:
     import legifrance
@@ -65,14 +66,30 @@ def _lien_texte(cid):
 _MESSAGE_PANNE = "PISTE n'a pas répondu : recherche inaboutie, à relancer."
 
 
+def _date_valide(date):
+    """Vrai si <date> est une date réelle au format AAAA-MM-JJ, celui qu'attend legifrance.py
+    (même règle que `legifrance._ms`) : « 2024-03-15 » oui ; « 15/03/2024 », « 2024-02-30 »,
+    une chaîne vide ou None, non."""
+    try:
+        datetime.datetime.strptime(date, "%Y-%m-%d")
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
 def travaux_pour_article(code, article, date):
     """Retourne les travaux parlementaires du texte ayant créé la version de
     <article> du <code> applicable au <date> (YYYY-MM-DD).
+    Une date invalide est refusée d'emblée : `trouve` False, `date_invalide` True, et un message
+    qui rappelle le format attendu ; PISTE n'est pas interrogé.
     Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident), comme celles
     de legifrance.py : avec `trouve` False si l'article ou son texte créateur n'ont pu être
     identifiés ; avec `trouve` True si seuls les travaux ou le dossier n'ont pu être lus."""
     if not legifrance:
         return {"trouve": False, "erreur": "connecteur Légifrance indisponible"}
+    if not _date_valide(date):
+        return {"trouve": False, "date_invalide": True, "article": article, "code": code,
+                "message": f"Date invalide : « {date} ». Format attendu : AAAA-MM-JJ (ex. 2024-03-15)."}
     if _est_reglementaire(article):
         return {"trouve": False, "reglementaire": True, "article": article, "code": code,
                 "message": "Disposition réglementaire : pas de travaux parlementaires."}
