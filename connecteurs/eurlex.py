@@ -110,7 +110,9 @@ def _phares(question):
 def chercher(question, k=6, secteurs=("3", "6"), timeout=60):
     """Recherche EUR-Lex. Réponse directe aux actes « phares » détectés par sigle (DSA, DMA,
     AI Act…), complétée par une recherche par mots-clés (ET) dans les titres FR. Renvoie une
-    liste de {reference, celex, type, date, lien}."""
+    liste de {reference, celex, type, date, lien}.
+    Si le point d'accès ne répond pas (réseau, délai dépassé, erreur HTTP), l'erreur remonte, comme
+    dans les fonctions de recherche de legifrance.py : une panne n'est pas un résultat vide."""
     phares = _phares(question)
     mots = _mots(question)
     if not mots:
@@ -129,12 +131,9 @@ SELECT DISTINCT ?celex ?title ?date WHERE {{
   FILTER({sect})
 }} LIMIT {max(k*8, 40)}'''
     url = ENDPOINT + "?" + urllib.parse.urlencode({"query": q, "format": "application/sparql-results+json"})
-    try:
-        req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
-                                                   "User-Agent": "Mozilla/5.0"})
-        js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
-    except Exception:
-        return phares[:k]
+    req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
+                                               "User-Agent": "Mozilla/5.0"})
+    js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
     cand, seen = [], set()
     for b in js.get("results", {}).get("bindings", []):
         celex = b.get("celex", {}).get("value", "")
