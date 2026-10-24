@@ -152,5 +152,105 @@ class ResoudreExact(unittest.TestCase):
         self.assertEqual(h["versions"], [])
 
 
+class PanneDePiste(Exception):
+    """Erreur simulée : PISTE ne répond pas."""
+
+
+def post_en_panne(chemin_en_panne, num_rendu="L181-18", fond=None, a_partir_de=1, versions=()):
+    """Substitut de `_post` qui lève `PanneDePiste` sur `chemin_en_panne` (et, si `fond` est
+    donné, seulement pour ce fonds), à partir du `a_partir_de`-ième appel à ce chemin ; les autres
+    appels répondent comme `faux_post`. `versions` : versions rendues par getArticle."""
+    normal = faux_post(num_rendu)
+    compte = {"n": 0}
+
+    def _post(chemin, charge):
+        if chemin == chemin_en_panne and (fond is None or charge.get("fond") == fond):
+            compte["n"] += 1
+            if compte["n"] >= a_partir_de:
+                raise PanneDePiste("503 Service Unavailable")
+        reponse = normal(chemin, charge)
+        if chemin == "/consult/getArticle" and versions:
+            reponse["article"]["articleVersions"] = list(versions)
+        return reponse
+    return _post
+
+
+class Pannes(unittest.TestCase):
+    """Une panne de PISTE est signalée par le champ `panne`, et non confondue avec une absence."""
+
+    CODE = "Code de l'environnement"
+    LOI = "loi n° 78-17"
+
+    def setUp(self):
+        for patch in (mock.patch.object(legifrance, "_CODES_MAP", {"code de l'environnement": self.CODE}),
+                      mock.patch.dict(legifrance._TOC_CACHE, clear=True),
+                      mock.patch.dict(legifrance.DERNIERE_PANNE, {"quand": None, "quoi": None, "nombre": 0})):
+            patch.start()
+            self.addCleanup(patch.stop)
+
+    def appeler(self, faux, fonction, *args, **kwargs):
+        with mock.patch.object(legifrance, "_post", faux):
+            return fonction(*args, **kwargs)
+
+    def test_loi_non_identifiee_panne(self):
+        r = self.appeler(post_en_panne("/search", fond="LODA_DATE"),
+                         legifrance.resoudre_loi, self.LOI, "article 6", "2024-03-15")
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+
+    def test_loi_plan_panne(self):
+        r = self.appeler(post_en_panne("/consult/legiPart"),
+                         legifrance.resoudre_loi, self.LOI, "article 6", "2024-03-15")
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+
+    def test_loi_absente_sans_panne(self):
+        def sans_resultat(chemin, charge):
+            return {"results": []}
+        r = self.appeler(sans_resultat, legifrance.resoudre_loi, self.LOI, "article 6", "2024-03-15")
+        self.assertFalse(r["trouve"])
+        self.assertNotIn("panne", r)
+
+    def test_historique_loi_panne(self):
+        h = self.appeler(post_en_panne("/search", fond="LODA_DATE"),
+                         legifrance.historique_article, self.LOI, "article 6", "2024-03-15")
+        self.assertFalse(h["trouve"])
+        self.assertIn("503", h["panne"])
+
+    def test_historique_article_panne(self):
+        # 1er getArticle : dans `resoudre` ; 2e : dans `historique_article`, en panne
+        h = self.appeler(post_en_panne("/consult/getArticle", num_rendu="L181-18", a_partir_de=2),
+                         legifrance.historique_article, self.CODE, "L. 181-18", "2024-03-15")
+        self.assertEqual(h, {"trouve": False, "panne": "503 Service Unavailable"})
+
+    def test_historique_version_panne(self):
+        # 3e getArticle, celui de la version, en panne : l'historique est rendu, avec `panne`
+        version = {"id": "LEGIARTI000000000004", "version": "1.0", "dateDebut": None, "dateFin": None}
+        h = self.appeler(post_en_panne("/consult/getArticle", num_rendu="L181-18", a_partir_de=3,
+                                       versions=[version]),
+                         legifrance.historique_article, self.CODE, "L. 181-18", "2024-03-15")
+        self.assertTrue(h["trouve"])
+        self.assertIn("503", h["panne"])
+        self.assertIsNone(h["versions"][0]["modif"])
+
+    def test_historique_sans_panne(self):
+        h = self.appeler(faux_post("L181-18"), legifrance.historique_article,
+                         self.CODE, "L. 181-18", "2024-03-15")
+        self.assertTrue(h["trouve"])
+        self.assertNotIn("panne", h)
+
+    def test_subdivision_de_code_panne(self):
+        r = self.appeler(post_en_panne("/search"), legifrance.resoudre_subdivision,
+                         "code", self.CODE, [("titre", "Ier")], "2024-03-15")
+        self.assertFalse(r["trouve"])
+        self.assertIn("503", r["panne"])
+
+    def test_compteur_de_pannes(self):
+        for _ in range(2):
+            self.appeler(post_en_panne("/consult/legiPart"),
+                         legifrance.resoudre_loi, self.LOI, "article 6", "2024-03-15")
+        self.assertEqual(legifrance.DERNIERE_PANNE["nombre"], 2)
+
+
 if __name__ == "__main__":
     unittest.main()
