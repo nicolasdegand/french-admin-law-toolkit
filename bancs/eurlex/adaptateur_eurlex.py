@@ -9,8 +9,8 @@
     python3 mesurer.py --comparer chercher.json termes.json
 
 `chercher` reçoit la question ; `chercher_termes`, les termes que le banc associe à cette
-question (champ `termes`). Le banc est lu dans EURLEX_BANC (par défaut, le banc de ce dossier).
-"""
+question (champ `termes`). Le banc est lu dans EURLEX_BANC (par défaut, banc_eurlex.jsonl ; le
+banc de contrôle est banc_eurlex_controle.jsonl)."""
 import json
 import os
 import sys

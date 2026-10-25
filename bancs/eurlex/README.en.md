@@ -1,6 +1,6 @@
 # EUR-Lex benchmark
 
-12 questions to compare the two searches of
+Two sets of 12 questions to compare the two searches of
 [`connecteurs/eurlex.py`](../../connecteurs/eurlex.py): do they retrieve the
 Union act at stake in the question?
 
@@ -36,22 +36,57 @@ and working time.
 
 ## Measurement of 25/10/2026
 
-| | `chercher` | `chercher_termes` |
-|---|---:|---:|
-| act found in the first 10 | 0 of 12 | 9 of 12 |
-| nDCG@10 | 0.000 | 0.496 |
-| MRR | 0.000 | 0.415 |
-| median rank of the act found | — | 2 |
-| duration of the 12 questions | 8.7 s | 2.2 s |
+| | original `chercher` | reworked `chercher` | `chercher_termes` |
+|---|---:|---:|---:|
+| act found in the first 10 | 0 of 12 | 9 of 12 | 9 of 12 |
+| nDCG@10 | 0.000 | 0.564 | 0.496 |
+| MRR | 0.000 | 0.507 | 0.415 |
+| median rank of the act found | — | 1 | 2 |
+| duration of the 12 questions | 8.7 s | 36 s | 10 s |
+
+The duration includes the state of the acts (in force, consolidated version,
+corrigenda) and, for `chercher`, the search in the case law, returned after the
+acts.
 
 The three acts missed by `chercher_termes` are missed because of the terms:
 "déduction" is not in the title of the VAT directive, "faune et flore" is not
 the wording of the Habitats directive ("de la faune et de la flore"), and
 "déchets" alone is too general to bring up the framework directive.
 
-`chercher` finds no act: the words it extracts from the question
+The original `chercher` found no act: the words extracted from the question
 ("environnementale", "étude", "impact"…) are not those of the titles, and the
-endpoint returns the first titles containing any of them, before any ranking.
+endpoint returned the first titles containing any of them, before any ranking.
+The reworked `chercher` asks the full-text index for the titles containing at
+least two words of the question, singular or plural, and ranks them itself (see
+the docstring of `_classer`). It was tuned on this benchmark: hence the control
+benchmark.
+
+## Control benchmark
+
+[`banc_eurlex_controle.jsonl`](banc_eurlex_controle.jsonl): 12 other questions
+(State aid, concessions, competition, unfair terms, air passengers, medicinal
+products, CAP, social security, posting of workers, professional
+qualifications, water, services), written and validated before any change to
+`chercher`, and consulted only to check the tuning. Same format; designate it
+with `EURLEX_BANC`.
+
+| | original `chercher` | reworked `chercher` | `chercher_termes` |
+|---|---:|---:|---:|
+| act found in the first 10 | 0 of 12 | 5 of 12 | 9 of 12 |
+| nDCG@10 | 0.000 | 0.281 | 0.608 |
+| MRR | 0.000 | 0.239 | 0.566 |
+
+The gain of `chercher` is confirmed, more modestly. Its failures are mostly a
+matter of vocabulary: a question worded in terms of French law ("SDAGE",
+"salarié détaché", "diplôme d'architecte") does not meet that of the Union
+titles. `chercher_termes`, which starts from the words of the title, keeps 9 of
+12.
+
+What the tuning ruled out, with measurements: wildcards ("proje*"), too slow (9
+timeouts out of 12); the index's own ranking, which favours titles beginning
+with "Projet de…"; case law mixed with the acts (3 of 12 instead of 8 on the
+first benchmark). Putting acts in force before repealed acts raised the first
+benchmark from 8 to 9 of 12; no notable effect on the control benchmark.
 
 Twelve questions are not a representative sample: as for the other benchmarks,
 the figures serve to compare two configurations, not to measure an absolute

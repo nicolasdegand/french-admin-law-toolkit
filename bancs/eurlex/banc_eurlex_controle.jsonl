@@ -1,0 +1,16 @@
+// Banc de contrôle EUR-Lex : écrit et validé (25/10/2026) avant toute modification de chercher, et
+// consulté seulement à la fin, pour vérifier qu'une amélioration mesurée sur banc_eurlex.jsonl tient
+// sur des questions que la fonction n'a pas servi à régler. Actes attendus vérifiés dans Cellar ;
+// termes écrits avant cette vérification, non retouchés.
+{"id": "eu13", "question": "aide à l'investissement régional exemptée de notification à la Commission", "attendus": [{"cle": "32014R0651"}], "termes": ["aides", "exemption par catégorie"]}
+{"id": "eu14", "question": "procédure d'attribution d'un contrat de concession de service public", "attendus": [{"cle": "32014L0023"}], "termes": ["attribution de contrats de concession"]}
+{"id": "eu15", "question": "pouvoirs de l'autorité nationale de concurrence pour appliquer les articles 101 et 102 du traité", "attendus": [{"cle": "32003R0001"}], "termes": ["mise en œuvre des règles de concurrence"]}
+{"id": "eu16", "question": "caractère abusif d'une clause d'un contrat de prêt immobilier conclu avec un consommateur", "attendus": [{"cle": "31993L0013"}], "termes": ["clauses abusives", "consommateurs"]}
+{"id": "eu17", "question": "indemnisation d'un passager aérien en cas d'annulation ou de retard important du vol", "attendus": [{"cle": "32004R0261"}], "termes": ["passagers", "annulation", "retard"]}
+{"id": "eu18", "question": "autorisation de mise sur le marché d'un médicament à usage humain", "attendus": [{"cle": "32001L0083"}], "termes": ["médicaments à usage humain"]}
+{"id": "eu19", "question": "aides de la PAC prévues par le plan stratégique national", "attendus": [{"cle": "32021R2115"}], "termes": ["plans stratégiques relevant de la PAC"]}
+{"id": "eu20", "question": "législation de sécurité sociale applicable à un travailleur exerçant une activité dans deux États membres", "attendus": [{"cle": "32004R0883"}], "termes": ["coordination des systèmes de sécurité sociale"]}
+{"id": "eu21", "question": "conditions de travail applicables à un salarié détaché en France par une entreprise établie dans un autre État membre", "attendus": [{"cle": "31996L0071"}], "termes": ["détachement de travailleurs"]}
+{"id": "eu22", "question": "reconnaissance du diplôme d'architecte obtenu dans un autre État membre", "attendus": [{"cle": "32005L0036"}], "termes": ["reconnaissance des qualifications professionnelles"]}
+{"id": "eu23", "question": "objectif de bon état des masses d'eau fixé par le SDAGE", "attendus": [{"cle": "32000L0060"}], "termes": ["politique dans le domaine de l'eau"]}
+{"id": "eu24", "question": "régime d'autorisation d'une activité de service et liberté d'établissement du prestataire", "attendus": [{"cle": "32006L0123"}], "termes": ["services dans le marché intérieur"]}
