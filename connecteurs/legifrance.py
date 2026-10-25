@@ -611,7 +611,10 @@ def chercher_termes(termes, k=5, fond="CODE_ETAT"):
     question entière rendait du bruit (« Article 41 DE », « 6° : »), 2 sources sur 70.
     Retour : liste de {reference, titre, extrait, lien, fond}, la référence portant le
     NOM DU TEXTE (« Code de l'énergie, article L132-2 »), sans quoi deux articles L132-2
-    de deux codes sont indiscernables."""
+    de deux codes sont indiscernables.
+    `termes` : une liste de termes, ou une chaîne qui les contient tous."""
+    if isinstance(termes, str):
+        termes = [termes]
     valeur = " ".join(t for t in (termes or []) if t).strip()
     if not valeur:
         return []
