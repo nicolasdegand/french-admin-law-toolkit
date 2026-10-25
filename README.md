@@ -32,6 +32,10 @@ vigueur. Chaque cas a été ajouté parce qu'une implémentation s'y était trom
 l'insertion, une ligne de tableau comptée pour un alinéa, une plage d'articles
 dont l'élément intermédiaire est oublié.
 
+**[`bancs/eurlex/`](bancs/eurlex/)** — 12 questions pour comparer les deux
+recherches d'EUR-Lex de `connecteurs/eurlex.py` : retrouvent-elles l'acte de
+l'Union en cause ? Le seul banc qui interroge le réseau.
+
 **[`bancs/mesurer.py`](bancs/mesurer.py)** — Le harnais de mesure : nDCG@10,
 rappel, MRR, rang du premier attendu, et le détail par fonds. Il appelle votre
 moteur à travers un adaptateur de quelques lignes et cherche lui-même les

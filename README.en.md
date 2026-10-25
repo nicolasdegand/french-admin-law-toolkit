@@ -32,6 +32,10 @@ as follows) taken for a replacement operator when it also serves for insertion, 
 table row counted as a paragraph (*alinéa*), a range of articles whose middle
 element is forgotten.
 
+**[`bancs/eurlex/`](bancs/eurlex/)**: 12 questions to compare the two EUR-Lex
+searches of `connecteurs/eurlex.py`: do they retrieve the Union act at stake?
+The only benchmark that uses the network.
+
 **[`bancs/mesurer.py`](bancs/mesurer.py)**: The measurement harness: nDCG@10,
 recall, MRR, rank of the first expected result, and the breakdown by corpus. It
 calls your engine through an adapter of a few lines and looks for the identifiers

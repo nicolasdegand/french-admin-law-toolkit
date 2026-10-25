@@ -1,0 +1,15 @@
+// Banc pilote EUR-Lex : question rédigée comme dans un dossier ; acte attendu (CELEX) ; termes
+// choisis pour chercher_termes à partir de la seule question, avant tout essai et avant d'avoir
+// relu l'intitulé des actes (25/10/2026).
+{"id": "eu01", "question": "évaluation environnementale d'un projet soumis à étude d'impact", "attendus": [{"cle": "32011L0092"}], "termes": ["évaluation des incidences", "environnement"]}
+{"id": "eu02", "question": "TVA : droit à déduction des dépenses de restauration", "attendus": [{"cle": "32006L0112"}], "termes": ["taxe sur la valeur ajoutée", "déduction"]}
+{"id": "eu03", "question": "autorisation d'une installation relevant de la directive IED sur les émissions industrielles", "attendus": [{"cle": "32010L0075"}], "termes": ["émissions industrielles"]}
+{"id": "eu04", "question": "prévention des accidents majeurs sur un site Seveso", "attendus": [{"cle": "32012L0018"}], "termes": ["accidents majeurs", "substances dangereuses"]}
+{"id": "eu05", "question": "évaluation des incidences d'un plan ou programme sur l'environnement", "attendus": [{"cle": "32001L0042"}], "termes": ["incidences", "plans et programmes", "environnement"]}
+{"id": "eu06", "question": "site Natura 2000 : évaluation appropriée des incidences sur les habitats naturels", "attendus": [{"cle": "31992L0043"}], "termes": ["habitats naturels", "faune et flore"]}
+{"id": "eu07", "question": "chasse et conservation des oiseaux sauvages", "attendus": [{"cle": "32009L0147"}], "termes": ["conservation des oiseaux sauvages"]}
+{"id": "eu08", "question": "refus de communiquer une information relative à l'environnement détenue par l'administration", "attendus": [{"cle": "32003L0004"}], "termes": ["accès du public", "information en matière d'environnement"]}
+{"id": "eu09", "question": "obligation de quitter le territoire et délai de départ volontaire d'un étranger en séjour irrégulier", "attendus": [{"cle": "32008L0115"}], "termes": ["retour", "séjour irrégulier"]}
+{"id": "eu10", "question": "marchés publics : critères d'attribution et offre anormalement basse", "attendus": [{"cle": "32014L0024"}], "termes": ["marchés publics", "passation"]}
+{"id": "eu11", "question": "temps de travail et repos journalier des agents publics", "attendus": [{"cle": "32003L0088"}], "termes": ["aménagement du temps de travail"]}
+{"id": "eu12", "question": "notion de déchet et sortie du statut de déchet", "attendus": [{"cle": "32008L0098"}], "termes": ["déchets"]}
