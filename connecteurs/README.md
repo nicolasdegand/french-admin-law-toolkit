@@ -100,12 +100,23 @@ en vain.
 import eurlex
 eurlex.chercher("protection des données à caractère personnel", k=6)
 eurlex.chercher("aides d'État", k=6, secteurs=("3",))     # législation seulement
+eurlex.chercher_termes(["émissions industrielles"], k=6)  # tous les termes, dans le titre
 ```
 
 Interroge le point d'accès SPARQL public Cellar, par mots-clés dans les titres
 français, restreint par défaut à la législation (secteur CELEX 3) et à la
 jurisprudence de l'Union (secteur 6). Aucune authentification. Rend référence,
-type, date et lien EUR-Lex.
+type, titre, date et lien EUR-Lex.
+
+`chercher` part d'une question rédigée librement ; elle reconnaît en outre
+quelques actes par leur sigle (RGPD, DSA…). `chercher_termes` prend les termes
+que vous choisissez et ne retient que les titres qui les contiennent tous, par
+l'index plein texte du point d'accès : réponse en une seconde environ, titres
+classés par pertinence, législation par défaut, rectificatifs rattachés à leur
+acte. Un terme est cherché tel quel
+(« projet » ne trouve pas « projets ») : reprenez les mots de l'intitulé. Sur le
+banc de [`bancs/eurlex/`](../bancs/eurlex/), elle trouve l'acte attendu pour 9
+questions sur 12, `chercher` pour aucune.
 
 ## Conseil constitutionnel : les QPC en instance
 

@@ -102,12 +102,21 @@ than searching in vain.
 import eurlex
 eurlex.chercher("protection des données à caractère personnel", k=6)
 eurlex.chercher("aides d'État", k=6, secteurs=("3",))     # législation seulement
+eurlex.chercher_termes(["émissions industrielles"], k=6)  # tous les termes, dans le titre
 ```
 
 Queries the public Cellar SPARQL endpoint, by keywords in the French titles,
 restricted by default to legislation (CELEX sector 3) and to the case law of the
-Union (sector 6). No authentication. Returns reference, type, date and EUR-Lex
-link.
+Union (sector 6). No authentication. Returns reference, type, title, date and
+EUR-Lex link.
+
+`chercher` starts from a freely worded question; it also recognises a few acts
+by their acronym (GDPR, DSA…). `chercher_termes` takes the terms you choose and
+keeps only the titles containing all of them, through the endpoint's full-text
+index: an answer in about a second, titles ranked by relevance, legislation by
+default, corrigenda attached to their act. A term is searched as is ("projet" does not find "projets"): use the
+words of the title. On the bench in [`bancs/eurlex/`](../bancs/eurlex/), it finds
+the expected act for 9 questions out of 12, `chercher` for none.
 
 ## Constitutional Council: pending QPC
 

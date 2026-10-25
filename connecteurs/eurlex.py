@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """Recherche EUR-Lex (droit de l'Union) via le point d'accès SPARQL public Cellar.
 
-Recherche par mots-clés dans les titres français, restreinte par défaut à la
-législation (secteur CELEX 3) et à la jurisprudence de l'Union (secteur 6).
-Aucune authentification. Renvoie référence, type, date et lien EUR-Lex.
+Recherche dans les titres français. `chercher` part d'une question rédigée
+librement (législation et jurisprudence de l'Union, secteurs CELEX 3 et 6) ;
+`chercher_termes` part de termes choisis par l'appelant, qui doivent tous figurer
+dans le titre (législation par défaut). Aucune authentification. Renvoie
+référence, type, titre, date et lien EUR-Lex.
 """
 import re, urllib.request, urllib.parse, json
 
@@ -220,6 +222,71 @@ SELECT DISTINCT ?celex ?title ?date WHERE {{
             continue
         out.append(_resultat(celex, title, date))
     return out[:max(k, len(phares))]
+
+
+
+def _expression_plein_texte(terme):
+    """Terme -> expression exacte pour l'index plein texte (« "valeur ajoutée" ») : caractères
+    autres que lettres, chiffres, espaces et tirets remplacés par des espaces, car ils ont un
+    sens pour l'index ou termineraient la chaîne SPARQL. L'apostrophe devient une espace, comme
+    dans l'index (« d'environnement » -> « d environnement ») : retirer la lettre élidée ferait
+    manquer l'expression. None si rien ne reste."""
+    t = " ".join(re.sub(r"[^\w\s-]", " ", terme).split())
+    return f'"{t}"' if t else None
+
+
+# Numéro CELEX d'un rectificatif : celui de l'acte rectifié suivi de « R(nn) ».
+_RE_RECTIFICATIF = re.compile(r"^(.+)R\(\d+\)$")
+
+
+def chercher_termes(termes, k=6, secteurs=("3",), timeout=60):
+    """Recherche EUR-Lex des documents dont le titre français contient TOUS les termes (ET),
+    choisis par l'appelant : ni extraction de mots, ni remplacement de sigles, ni actes phares.
+
+    La recherche passe par l'index plein texte du point d'accès (`bif:contains`, extension de
+    Virtuoso, logiciel du point d'accès, et non du SPARQL standard) : réponse en une seconde
+    environ, titres classés par pertinence. Un terme est un mot ou une expression, cherché tel
+    quel, sans tenir compte des majuscules : « projet » ne trouve pas « projets », « faune et
+    flore » ne trouve pas « de la faune et de la flore ». Reprendre les mots de l'intitulé.
+
+    Par défaut, la législation seule (secteur 3) ; secteurs=("3", "6") y ajoute la jurisprudence.
+    Un rectificatif trouvé avec son acte (numéro de l'acte suivi de « R(nn) ») ne prend pas de
+    place dans les résultats : son numéro figure dans le champ `rectificatifs` de l'acte. Ce champ
+    ne liste que les rectificatifs dont le titre contient les termes : vide, il ne prouve pas
+    qu'il n'en existe aucun. Les résumés d'arrêts (« _SUM »), qui doublent l'arrêt, sont écartés.
+    Mesure sur un banc de questions : bancs/eurlex/.
+    Renvoie une liste de {reference, celex, type, titre, date, lien, rectificatifs}, vide si aucun
+    terme n'est donné. Si le point d'accès ne répond pas, l'erreur remonte, comme dans
+    `chercher`."""
+    if isinstance(termes, str):
+        termes = [termes]
+    expressions = [e for e in (_expression_plein_texte(t) for t in (termes or []) if t) if e]
+    if not expressions:
+        return []
+    sect = " || ".join(f'STRSTARTS(STR(?celex),"{s}")' for s in secteurs)
+    q = f'''PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
+SELECT DISTINCT ?celex ?title ?date ?sc WHERE {{
+  ?exp cdm:expression_title ?title .
+  ?title bif:contains '{" AND ".join(expressions)}' OPTION (score ?sc) .
+  ?exp cdm:expression_uses_language <{_FRA}> ;
+       cdm:expression_belongs_to_work ?work .
+  ?work cdm:resource_legal_id_celex ?celex .
+  OPTIONAL {{ ?work cdm:work_date_document ?date }}
+  FILTER({sect})
+  FILTER(!CONTAINS(STR(?celex), "_SUM"))
+}} ORDER BY DESC(?sc) LIMIT {max(k * 3, 30)}'''
+    lignes = _executer(q, timeout)
+    trouves = {celex for celex, _, _ in lignes}
+    rectificatifs, out = {}, []
+    for celex, titre, date in lignes:
+        m = _RE_RECTIFICATIF.match(celex)
+        if m and m.group(1) in trouves:
+            rectificatifs.setdefault(m.group(1), []).append(celex)
+        else:
+            out.append(_resultat(celex, titre, date))
+    for r in out:
+        r["rectificatifs"] = rectificatifs.get(r["celex"], [])
+    return out[:k]
 
 
 if __name__ == "__main__":
