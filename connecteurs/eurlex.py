@@ -79,7 +79,7 @@ def _lien(celex):
 
 def _mots(question, n=8):
     stop = {"dans","pour","avec","cette","les","des","une","aux","sur","par","que","qui","est","sont",
-            "selon","entre","leur","plus","doit","etre","être","ainsi","dont","cette","elle","aux",
+            "selon","entre","leur","plus","doit","etre","être","ainsi","dont","elle",
             # bruit procédural (n'aide pas la recherche thématique EUR-Lex)
             "appel","appelant","requete","requête","requérant","requerant","annulation","annuler","jugement",
             "arret","arrêt","tribunal","cour","instance","demande","demandeur","rejete","rejeté","rejet",
@@ -107,7 +107,7 @@ def _mots(question, n=8):
     for sig, terme in expand.items():
         q = re.sub(r"\b" + sig + r"\b", " " + terme + " ", q, flags=re.IGNORECASE)
     # acronymes purement français à ignorer (absents des titres de l'Union)
-    dom = {"lpf","cgi","cja","ce","ca3","ca","ceseda","cgct","csp","css","crpa","cerfa","cade","cja","ta","caa","cc"}
+    dom = {"lpf","cgi","cja","ce","ca3","ca","ceseda","cgct","csp","css","crpa","cerfa","cade","ta","caa","cc"}
     raw = re.split(r"[^0-9A-Za-zà-ÿÀ-Ÿ]+", q)
     toks = [w for w in (t.lower() for t in raw) if len(w) > 3 and w not in stop and w not in dom]
     toks = list(dict.fromkeys(sorted(dict.fromkeys(toks), key=len, reverse=True)))[:n]
@@ -116,46 +116,52 @@ def _mots(question, n=8):
 
 # Actes européens « phares » identifiables par un sigle : réponse directe et exacte,
 # le sigle n'apparaissant pas dans le titre officiel (recherche par mots-clés inefficace).
+# Chaque entrée : motif, numéro CELEX, date de l'acte (AAAA-MM-JJ), titre.
+# Numéros et dates vérifiés le 25/10/2026. Une entrée est à mettre à jour quand l'acte est
+# abrogé ou remplacé : le module le rendrait sinon sans avertissement.
 _ACTES_PHARES = [
-    (r"\b(dsa|digital services act|r[eè]glement sur les services num[ée]riques)\b", "32022R2065",
+    (r"\b(dsa|digital services act|r[eè]glement sur les services num[ée]riques)\b", "32022R2065", "2022-10-19",
      "Règlement (UE) 2022/2065 relatif à un marché unique des services numériques (règlement sur les services numériques — DSA)"),
-    (r"\b(dma|digital markets act|r[eè]glement sur les march[ée]s num[ée]riques)\b", "32022R1925",
+    (r"\b(dma|digital markets act|r[eè]glement sur les march[ée]s num[ée]riques)\b", "32022R1925", "2022-09-14",
      "Règlement (UE) 2022/1925 relatif aux marchés contestables et équitables dans le secteur numérique (DMA)"),
-    (r"\b(ai act|r[eè]glement (sur l['’ ]?)?ia|intelligence artificielle)\b", "32024R1689",
+    (r"\b(ai act|r[eè]glement (sur l['’ ]?)?ia|intelligence artificielle)\b", "32024R1689", "2024-06-13",
      "Règlement (UE) 2024/1689 établissant des règles harmonisées concernant l'intelligence artificielle (règlement sur l'IA)"),
-    (r"\b(data act|r[eè]glement sur les donn[ée]es)\b", "32023R2854",
+    (r"\b(data act|r[eè]glement sur les donn[ée]es)\b", "32023R2854", "2023-12-13",
      "Règlement (UE) 2023/2854 (règlement sur les données — Data Act)"),
-    (r"\b(data governance act|gouvernance des donn[ée]es|dga)\b", "32022R0868",
+    (r"\b(data governance act|gouvernance des donn[ée]es|dga)\b", "32022R0868", "2022-05-30",
      "Règlement (UE) 2022/868 portant sur la gouvernance européenne des données (DGA)"),
-    (r"\b(nis ?2|directive sri ?2)\b", "32022L2555",
+    (r"\b(nis ?2|directive sri ?2)\b", "32022L2555", "2022-12-14",
      "Directive (UE) 2022/2555 (SRI 2 / NIS 2) — cybersécurité"),
-    (r"\bdora\b", "32022R2554",
+    (r"\bdora\b", "32022R2554", "2022-12-14",
      "Règlement (UE) 2022/2554 sur la résilience opérationnelle numérique du secteur financier (DORA)"),
-    (r"\b(rgpd|gdpr)\b", "32016R0679",
+    (r"\b(rgpd|gdpr)\b", "32016R0679", "2016-04-27",
      "Règlement (UE) 2016/679 (protection des données — RGPD)"),
-    (r"\b(csrd)\b", "32022L2464",
+    (r"\b(csrd)\b", "32022L2464", "2022-12-14",
      "Directive (UE) 2022/2464 (publication d'informations en matière de durabilité — CSRD)"),
-    (r"\beidas\b", "32014R0910",
+    (r"\beidas\b", "32014R0910", "2014-07-23",
      "Règlement (UE) n° 910/2014 (identification électronique et services de confiance — eIDAS)"),
 ]
 
 
 def _phares(question):
     out, vus = [], set()
-    for pat, celex, titre in _ACTES_PHARES:
+    for pat, celex, date, titre in _ACTES_PHARES:
         if celex in vus:
             continue
         if re.search(pat, question or "", flags=re.IGNORECASE):
             vus.add(celex)
             out.append({"reference": "%s — CELEX %s" % (_type_celex(celex), celex), "celex": celex,
-                        "type": _type_celex(celex), "titre": titre, "date": "", "lien": _lien(celex)})
+                        "type": _type_celex(celex), "titre": titre, "date": date, "lien": _lien(celex)})
     return out
 
 
 def chercher(question, k=6, secteurs=("3", "6"), timeout=60):
     """Recherche EUR-Lex. Réponse directe aux actes « phares » détectés par sigle (DSA, DMA,
-    AI Act…), complétée par une recherche par mots-clés (ET) dans les titres FR. Renvoie une
-    liste de {reference, celex, type, date, lien}.
+    AI Act…), complétée par une recherche par mots-clés dans les titres FR : un titre est retenu
+    s'il contient l'un des mots (OU) ; les titres sont classés par nombre de mots présents, puis
+    du plus récent au plus ancien, et ceux qui n'en contiennent qu'un sont écartés dès qu'un
+    autre en contient au moins deux. Renvoie une liste de {reference, celex, type, titre, date,
+    lien}.
     Si le point d'accès ne répond pas (réseau, délai dépassé, erreur HTTP), l'erreur remonte, comme
     dans les fonctions de recherche de legifrance.py : une panne n'est pas un résultat vide."""
     phares = _phares(question)
