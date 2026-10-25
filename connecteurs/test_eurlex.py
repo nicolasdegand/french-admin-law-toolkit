@@ -106,6 +106,37 @@ class TypesDeDocument(unittest.TestCase):
         self.assertEqual(eurlex._phares("RGPD")[0]["reference"], "Règlement — CELEX 32016R0679")
 
 
+class Sigles(unittest.TestCase):
+    """Les mots substitués à un sigle figurent dans l'intitulé français des actes visés, car la
+    recherche porte sur les titres. Intitulés vérifiés le 25/10/2026 (Observatoire législatif du
+    Parlement européen ; AIDA, Ineris, pour la directive 2012/18/UE)."""
+
+    INTITULES = {
+        "icpe": ["Directive 2010/75/UE du Parlement européen et du Conseil relative aux émissions "
+                 "industrielles (prévention et réduction intégrées de la pollution)",
+                 "Directive 2012/18/UE du Parlement européen et du Conseil du 4 juillet 2012 concernant "
+                 "la maîtrise des dangers liés aux accidents majeurs impliquant des substances dangereuses"],
+        "oqtf": ["Directive 2008/115/CE du Parlement européen et du Conseil relative aux normes et "
+                 "procédures communes applicables dans les États membres au retour des ressortissants "
+                 "de pays tiers en séjour irrégulier"],
+        "nis2": ["Directive (UE) 2022/2555 du Parlement européen et du Conseil concernant des mesures "
+                 "destinées à assurer un niveau élevé commun de cybersécurité dans l'ensemble de l'Union"],
+        "dma": ["Règlement (UE) 2022/1925 relatif aux marchés contestables et équitables dans le "
+                "secteur numérique"],
+    }
+
+    def test_mots_dans_les_intitules(self):
+        for sigle, intitules in self.INTITULES.items():
+            texte = " ".join(intitules).lower()
+            for mot in eurlex._mots(sigle):
+                with self.subTest(sigle=sigle, mot=mot):
+                    self.assertIn(mot, texte)
+
+    def test_variantes_d_un_meme_acte(self):
+        self.assertEqual(eurlex._mots("digital markets act"), eurlex._mots("DMA"))
+        self.assertEqual(eurlex._mots("NIS 2"), eurlex._mots("NIS2"))
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
