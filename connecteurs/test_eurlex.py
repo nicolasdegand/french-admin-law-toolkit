@@ -10,6 +10,7 @@ import json
 import socket
 import unittest
 import urllib.error
+import urllib.parse
 from unittest import mock
 
 import eurlex
@@ -20,6 +21,12 @@ def reponse_sparql(lignes):
     corps = {"results": {"bindings": [
         {"celex": {"value": c}, "title": {"value": t}, "date": {"value": d}} for c, t, d in lignes]}}
     return mock.Mock(return_value=mock.Mock(read=lambda: json.dumps(corps).encode("utf-8")))
+
+
+def requete_envoyee(substitut):
+    """Texte de la requête SPARQL passée au substitut de `urlopen` lors de son dernier appel."""
+    url = substitut.call_args[0][0].full_url
+    return urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0]
 
 
 class Pannes(unittest.TestCase):
@@ -190,6 +197,115 @@ class ActesPhares(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", reponse_sparql([])):
             r = eurlex.chercher("durée de conservation des données au regard du RGPD")
         self.assertEqual(r[0]["date"], "2016-04-27")
+
+
+class TousLesTermes(unittest.TestCase):
+    """chercher_termes : titres qui contiennent tous les termes choisis par l'appelant, par l'index
+    plein texte du point d'accès. Titres fictifs."""
+
+    def requete(self, *a, **kw):
+        substitut = reponse_sparql([])
+        with mock.patch("urllib.request.urlopen", substitut):
+            eurlex.chercher_termes(*a, **kw)
+        return requete_envoyee(substitut)
+
+    def test_index_plein_texte_en_et(self):
+        q = self.requete(["Taxe", "valeur ajoutée"])
+        self.assertIn("?title bif:contains '\"Taxe\" AND \"valeur ajoutée\"' OPTION (score ?sc)", q)
+        self.assertIn("ORDER BY DESC(?sc)", q)
+
+    def test_legislation_par_defaut(self):
+        self.assertIn('FILTER(STRSTARTS(STR(?celex),"3"))', self.requete(["taxe"]))
+        self.assertIn('STRSTARTS(STR(?celex),"6")', self.requete(["taxe"], secteurs=("3", "6")))
+
+    def test_resumes_ecartes_rectificatifs_demandes(self):
+        q = self.requete(["taxe"])
+        self.assertIn('FILTER(!CONTAINS(STR(?celex), "_SUM"))', q)
+        self.assertNotIn('"R("', q)
+
+    def celex_et_rectificatifs(self, lignes, k=6):
+        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
+            return [(x["celex"], x["rectificatifs"]) for x in eurlex.chercher_termes(["émissions"], k=k)]
+
+    def test_rectificatifs_rattaches_a_l_acte(self):
+        lignes = [("32010L0075", "Directive relative aux émissions industrielles", "2010-11-24"),
+                  ("32010L0075R(03)", "Rectificatif à la directive relative aux émissions", "2012-06-19"),
+                  ("32010L0075R(15)", "Rectificatif à la directive relative aux émissions", "2022-02-10"),
+                  ("32024L1785", "Directive modifiant la directive relative aux émissions", "2024-04-24")]
+        self.assertEqual(self.celex_et_rectificatifs(lignes),
+                         [("32010L0075", ["32010L0075R(03)", "32010L0075R(15)"]), ("32024L1785", [])])
+
+    def test_rectificatif_classe_avant_son_acte(self):
+        """L'acte garde son propre rang ; le rectificatif ne prend pas de place."""
+        lignes = [("32010L0075R(03)", "Rectificatif à la directive relative aux émissions", "2012-06-19"),
+                  ("32024L1785", "Directive modifiant la directive relative aux émissions", "2024-04-24"),
+                  ("32010L0075", "Directive relative aux émissions industrielles", "2010-11-24")]
+        self.assertEqual(self.celex_et_rectificatifs(lignes),
+                         [("32024L1785", []), ("32010L0075", ["32010L0075R(03)"])])
+
+    def test_rectificatif_sans_son_acte(self):
+        lignes = [("31992L0043R(08)", "Rectificatif à la directive 92/43/CEE", "2026-03-31")]
+        self.assertEqual(self.celex_et_rectificatifs(lignes), [("31992L0043R(08)", [])])
+
+    def test_k_compte_apres_rattachement(self):
+        lignes = [("32010L0075", "Directive relative aux émissions", "2010-11-24"),
+                  ("32010L0075R(03)", "Rectificatif à la directive relative aux émissions", "2012-06-19"),
+                  ("32024L1785", "Directive modifiant la directive relative aux émissions", "2024-04-24")]
+        self.assertEqual([c for c, _ in self.celex_et_rectificatifs(lignes, k=2)], ["32010L0075", "32024L1785"])
+
+    def test_chercher_inchangee(self):
+        substitut = reponse_sparql([])
+        with mock.patch("urllib.request.urlopen", substitut):
+            eurlex.chercher("évaluation des incidences sur l'environnement")
+        q = requete_envoyee(substitut)
+        self.assertNotIn("bif:contains", q)
+        self.assertIn(" || ", q.split("FILTER(")[1])
+
+    def test_expressions(self):
+        attendus = {"valeur ajoutée": '"valeur ajoutée"',
+                    "information en matière d'environnement": '"information en matière d environnement"',
+                    "L’Union": '"L Union"', 'règlement "omnibus"': '"règlement omnibus"',
+                    "a'b\\c (UE)*": '"a b c UE"', "  ": None, "'": None}
+        for terme, attendu in attendus.items():
+            with self.subTest(terme=terme):
+                self.assertEqual(eurlex._expression_plein_texte(terme), attendu)
+
+    def test_rien_ne_termine_la_chaine(self):
+        q = self.requete(["l'accès", 'a"b', "c\\d", "e\nf"])
+        expression = q.split("bif:contains '")[1].split("' OPTION")[0]
+        self.assertEqual(expression, '"l accès" AND "a b" AND "c d" AND "e f"')
+
+    def test_sans_terme_pas_de_requete(self):
+        substitut = reponse_sparql([])
+        with mock.patch("urllib.request.urlopen", substitut):
+            for termes in ([], None, ["", "  "], "'"):
+                with self.subTest(termes=termes):
+                    self.assertEqual(eurlex.chercher_termes(termes), [])
+        substitut.assert_not_called()
+
+    def test_chaine_seule(self):
+        """Une chaîne est prise comme un seul terme, non comme une suite de lettres."""
+        self.assertIn("bif:contains '\"valeur ajoutée\"'", self.requete("valeur ajoutée"))
+
+    def test_resultats_dans_l_ordre_du_point_d_acces(self):
+        lignes = [("32006L0112", "Directive relative au système commun de taxe sur la valeur ajoutée",
+                   "2006-11-28"),
+                  ("32022L0542", "Directive modifiant les taux de taxe sur la valeur ajoutée", "2022-04-05"),
+                  ("32008L0008", "Directive concernant le lieu des prestations de services", "2008-02-12")]
+        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
+            r = eurlex.chercher_termes(["taxe", "valeur ajoutée"], k=2)
+        self.assertEqual([x["celex"] for x in r], ["32006L0112", "32022L0542"])
+        self.assertEqual(set(r[0]), {"reference", "celex", "type", "titre", "date", "lien", "rectificatifs"})
+        self.assertEqual(r[0]["reference"], "Directive — CELEX 32006L0112")
+
+    def test_pas_d_acte_phare(self):
+        with mock.patch("urllib.request.urlopen", reponse_sparql([])):
+            self.assertEqual(eurlex.chercher_termes(["RGPD"]), [])
+
+    def test_panne(self):
+        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("réseau coupé")):
+            with self.assertRaises(urllib.error.URLError):
+                eurlex.chercher_termes(["taxe"])
 
 
 class Structure(unittest.TestCase):
