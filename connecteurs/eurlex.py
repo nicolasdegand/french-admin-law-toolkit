@@ -155,6 +155,30 @@ def _phares(question):
     return out
 
 
+def _executer(requete, timeout):
+    """Envoie la requête SPARQL au point d'accès et rend [(celex, titre, date)], un par numéro
+    CELEX, dans l'ordre du point d'accès. Une panne lève l'erreur."""
+    url = ENDPOINT + "?" + urllib.parse.urlencode({"query": requete, "format": "application/sparql-results+json"})
+    req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
+                                               "User-Agent": "Mozilla/5.0"})
+    js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    lignes, vus = [], set()
+    for b in js.get("results", {}).get("bindings", []):
+        celex = b.get("celex", {}).get("value", "")
+        if celex in vus:
+            continue
+        vus.add(celex)
+        lignes.append((celex, b.get("title", {}).get("value", ""),
+                       (b.get("date", {}).get("value", "") or "")[:10]))
+    return lignes
+
+
+def _resultat(celex, titre, date):
+    """Un document tel que le rendent les fonctions de recherche."""
+    return {"reference": f"{_type_celex(celex)} — CELEX {celex}", "celex": celex,
+            "type": _type_celex(celex), "titre": titre[:220], "date": date, "lien": _lien(celex)}
+
+
 def chercher(question, k=6, secteurs=("3", "6"), timeout=60):
     """Recherche EUR-Lex. Réponse directe aux actes « phares » détectés par sigle (DSA, DMA,
     AI Act…), complétée par une recherche par mots-clés dans les titres FR : un titre est retenu
@@ -181,20 +205,8 @@ SELECT DISTINCT ?celex ?title ?date WHERE {{
 {filtres}
   FILTER({sect})
 }} LIMIT {max(k*8, 40)}'''
-    url = ENDPOINT + "?" + urllib.parse.urlencode({"query": q, "format": "application/sparql-results+json"})
-    req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
-                                               "User-Agent": "Mozilla/5.0"})
-    js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
-    cand, seen = [], set()
-    for b in js.get("results", {}).get("bindings", []):
-        celex = b.get("celex", {}).get("value", "")
-        if celex in seen:
-            continue
-        seen.add(celex)
-        title = b.get("title", {}).get("value", "")
-        date = (b.get("date", {}).get("value", "") or "")[:10]
-        score = sum(1 for m in mots if m in title.lower())      # nombre de termes de la requête présents
-        cand.append((score, date, celex, title))
+    cand = [(sum(1 for m in mots if m in title.lower()), date, celex, title)   # nombre de termes présents
+            for celex, title, date in _executer(q, timeout)]
     cand = [c for c in cand if c[0] > 0]                         # au moins un terme de la requête présent
     if cand:
         mx = max(c[0] for c in cand)
@@ -206,9 +218,7 @@ SELECT DISTINCT ?celex ?title ?date WHERE {{
     for score, date, celex, title in cand[:k]:
         if celex in dejacelex:
             continue
-        out.append({"reference": f"{_type_celex(celex)} — CELEX {celex}",
-                    "celex": celex, "type": _type_celex(celex),
-                    "titre": title[:220], "date": date, "lien": _lien(celex)})
+        out.append(_resultat(celex, title, date))
     return out[:max(k, len(phares))]
 
 
