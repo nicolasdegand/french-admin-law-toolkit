@@ -419,6 +419,125 @@ class EtatDesActes(unittest.TestCase):
                 eurlex.chercher_termes(["émissions industrielles"])
 
 
+class LectureDesReferences(unittest.TestCase):
+    """_lire_reference : numéro CELEX déduit de la référence telle qu'on l'écrit."""
+
+    ACTES = {
+        "directive 2011/92/UE": "32011L0092",
+        "Règlement (UE) 2016/679": "32016R0679",
+        "règlement (UE) n° 910/2014": "32014R0910",
+        "règlement (CE) n° 1013/2006": "32006R1013",
+        "règlement (CE) n° 2201/2003": "32003R2201",          # numéro de quatre chiffres > 2015
+        "règlement (CEE) n° 1408/71": "31971R1408",           # année sur deux chiffres
+        "règlement d'exécution (UE) 2017/2384": "32017R2384",
+        "directive 92/43/CEE": "31992L0043",
+        "Directive (UE) 2022/2555": "32022L2555",
+        "décision n° 1386/2013/UE": "32013D1386",              # décision numérotée « n° »
+        "décision 2000/532/CE": "32000D0532",
+        "décision-cadre 2002/584/JAI": "32002F0584",
+        "recommandation 2003/47/CE": "32003H0047",
+    }
+
+    def test_actes(self):
+        for reference, celex in self.ACTES.items():
+            with self.subTest(reference=reference):
+                genre, candidats, _ = eurlex._lire_reference(reference)
+                self.assertEqual((genre, candidats[0]), ("acte", celex))
+
+    def test_autres_types_cherches(self):
+        _, candidats, attendu = eurlex._lire_reference("directive 2016/679")
+        self.assertEqual(candidats, ["32016L0679", "32016R0679", "32016D0679"])
+        self.assertEqual(attendu, (2016, 679))
+
+    def test_affaires(self):
+        self.assertEqual(eurlex._lire_reference("C-461/17")[:2],
+                         ("affaire", ["62017CJ0461", "62017CC0461", "62017CO0461"]))
+        self.assertEqual(eurlex._lire_reference("aff. C‑6/64")[1][0], "61964CJ0006")   # trait d'union insécable
+        self.assertEqual(eurlex._lire_reference("T-201/04")[1], ["62004TJ0201", "62004TO0201"])
+
+    def test_celex(self):
+        for celex in ("32016R0679", "32011D0517(01)", "02010L0075-20240804", "62017CJ0461"):
+            with self.subTest(celex=celex):
+                self.assertEqual(eurlex._lire_reference(celex)[:2], ("celex", [celex]))
+
+    def test_non_reconnues(self):
+        for reference in ("", None, "directive", "loi n° 78-17", "règlement 2016/67900"):
+            with self.subTest(reference=reference):
+                self.assertEqual(eurlex._lire_reference(reference)[0], None)
+
+    def test_titre_reprend_le_numero(self):
+        self.assertTrue(eurlex._titre_reprend("Règlement (UE) n ° 910/2014 du Parlement", 2014, 910))
+        self.assertTrue(eurlex._titre_reprend("Directive 92/43/CEE du Conseil", 1992, 43))
+        self.assertFalse(eurlex._titre_reprend("Directive 2011/92/UE", 2011, 9))
+
+
+class Resoudre(unittest.TestCase):
+    """resoudre : existence vérifiée dans Cellar, titres fictifs."""
+
+    def resoudre(self, reference, lignes, etat=False):
+        substitut = reponses(lignes, [])
+        with mock.patch("urllib.request.urlopen", substitut):
+            return eurlex.resoudre(reference, etat=etat), substitut
+
+    def test_acte_trouve(self):
+        r, substitut = self.resoudre("directive 2011/92/UE", [
+            ("32011L0092", "Directive 2011/92/UE concernant l'évaluation des incidences", "2011-12-13")])
+        self.assertEqual((r["trouve"], r["message"], [x["celex"] for x in r["resultats"]]),
+                         (True, None, ["32011L0092"]))
+        x = "^^<http://www.w3.org/2001/XMLSchema#string>"
+        self.assertIn(f'VALUES ?celex {{ "32011L0092"{x} "32011R0092"{x} "32011D0092"{x} }}',
+                      requete_envoyee(substitut))
+
+    def test_autres_types_seulement_si_introuvable(self):
+        r, _ = self.resoudre("directive 2011/92/UE", [
+            ("32011L0092", "Directive 2011/92/UE concernant l'évaluation des incidences", "2011-12-13"),
+            ("32011R0092", "Règlement (UE) n° 92/2011 de la Commission", "2011-02-03")])
+        self.assertEqual(r["autres"], [])
+
+    def test_mauvais_type(self):
+        r, _ = self.resoudre("directive 2016/679", [
+            ("32016R0679", "Règlement (UE) 2016/679 relatif à la protection des données", "2016-04-27")])
+        self.assertFalse(r["trouve"])
+        self.assertEqual([x["celex"] for x in r["autres"]], ["32016R0679"])
+        self.assertIn("autre type", r["message"])
+
+    def test_introuvable(self):
+        r, _ = self.resoudre("règlement (UE) 2016/6790", [])
+        self.assertEqual((r["trouve"], r["resultats"], r["autres"]), (False, [], []))
+        self.assertEqual(r["message"], "Introuvable dans EUR-Lex.")
+
+    def test_titre_sans_le_numero(self):
+        r, _ = self.resoudre("directive 2011/92/UE", [("32011L0092", "Directive sans numéro", "2011-12-13")])
+        self.assertTrue(r["trouve"])
+        self.assertIn("ne reprend pas le numéro", r["message"])
+
+    def test_affaire(self):
+        r, _ = self.resoudre("C-461/17", [
+            ("62017CC0461", "Conclusions de l'avocate générale", "2018-07-12"),
+            ("62017CJ0461", "Arrêt de la Cour du 7 novembre 2018", "2018-11-07")])
+        self.assertTrue(r["trouve"])
+        self.assertEqual([x["celex"] for x in r["resultats"]], ["62017CJ0461", "62017CC0461"])
+
+    def test_reference_non_reconnue_pas_de_requete(self):
+        r, substitut = self.resoudre("loi n° 78-17", [])
+        self.assertFalse(r["trouve"])
+        self.assertIn("non reconnue", r["message"])
+        substitut.assert_not_called()
+
+    def test_avec_etat(self):
+        substitut = reponses([("32010L0075", "Directive 2010/75/UE relative aux émissions industrielles",
+                               "2010-11-24")], ETAT_2010_75)
+        with mock.patch("urllib.request.urlopen", substitut):
+            r = eurlex.resoudre("directive 2010/75/UE")
+        self.assertEqual(substitut.call_count, 2)
+        self.assertEqual(r["resultats"][0]["version_consolidee"]["celex"], "02010L0075-20240804")
+
+    def test_panne(self):
+        with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("réseau coupé")):
+            with self.assertRaises(urllib.error.URLError):
+                eurlex.resoudre("directive 2011/92/UE")
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
