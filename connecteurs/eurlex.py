@@ -89,13 +89,15 @@ def _mots(question, n=8):
             "societe","société","application","méconnaissance","meconnaissance","fondee","fondée","fonde"}
     # acronymes/sigles étendus vers la terminologie EUR-Lex (les titres de l'UE n'emploient pas « TVA »)
     expand = {"tva": "taxe valeur ajoutée", "rgpd": "données caractère personnel",
-              "oqtf": "éloignement ressortissant pays tiers", "icpe": "installations classées environnement",
+              "oqtf": "retour ressortissant pays tiers séjour irrégulier",
+              "icpe": "émissions industrielles accidents majeurs substances dangereuses",
               "dpi": "propriété intellectuelle",
               "dsa": "marché unique services numériques", "digital services act": "marché unique services numériques",
-              "dma": "marchés contestables équitables secteur numérique", "digital markets act": "marchés numériques",
+              "dma": "marchés contestables équitables secteur numérique",
+              "digital markets act": "marchés contestables équitables secteur numérique",
               "ai act": "intelligence artificielle", "iaa": "intelligence artificielle",
               "ria": "intelligence artificielle", "règlement ia": "intelligence artificielle",
-              "nis2": "sécurité réseaux systèmes information", "nis 2": "sécurité réseaux systèmes information",
+              "nis2": "niveau élevé commun cybersécurité", "nis 2": "niveau élevé commun cybersécurité",
               "dora": "résilience opérationnelle numérique secteur financier",
               "data act": "règles harmonisées équité accès données utilisation données",
               "data governance act": "gouvernance européenne données",
