@@ -145,34 +145,115 @@ class Sigles(unittest.TestCase):
         self.assertEqual(eurlex._mots("NIS 2"), eurlex._mots("NIS2"))
 
 
+def aiguillage(actes=(), arrets=(), vigueur=(), cites=()):
+    """Substitut de `urlopen` qui répond selon la requête : titres de législation (`actes`), de
+    jurisprudence (`arrets`), vigueur des actes ({celex: "1" ou "0"}), acte cité dans la question
+    (`cites`) ; liste vide pour la requête d'état."""
+    def lignes(rangs):
+        return [{"celex": {"value": c}, "title": {"value": t}, "date": {"value": d}} for c, t, d in rangs]
+    def ouvrir(req, timeout=None):
+        q = urllib.parse.unquote_plus(req.full_url)
+        if "act_consolidated" in q:
+            liaisons = []
+        elif "resource_legal_in-force ?v\n}" in q:
+            liaisons = [{"bc": {"value": c}, "v": {"value": v}} for c, v in dict(vigueur).items()]
+        elif "VALUES ?celex" in q:
+            liaisons = lignes(cites)
+        elif 'STRSTARTS(STR(?celex), "6")' in q:
+            liaisons = lignes(arrets)
+        else:
+            liaisons = lignes(actes)
+        return mock.Mock(read=lambda: json.dumps({"results": {"bindings": liaisons}}).encode("utf-8"))
+    return mock.Mock(side_effect=ouvrir)
+
+
 class Classement(unittest.TestCase):
-    """Comportement décrit par la docstring de `chercher` : un titre est retenu s'il contient l'un
-    des mots (OU), ceux qui n'en contiennent qu'un sont écartés dès qu'un autre en contient deux.
-    Titres fictifs."""
+    """chercher : candidats de l'index plein texte (au moins deux mots de la question), classés par
+    `_classer`, actes puis jurisprudence. Titres fictifs."""
 
-    QUESTION = "évaluation des incidences sur l'environnement"
+    QUESTION = "chasse et conservation des oiseaux sauvages"
 
-    def test_un_seul_mot_suffit(self):
-        lignes = [("32001L0001", "Directive relative à l'environnement marin", "2001-01-01")]
-        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
-            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)], ["32001L0001"])
+    def chercher(self, question=QUESTION, **kw):
+        substitut = aiguillage(**kw)
+        with mock.patch("urllib.request.urlopen", substitut):
+            return [r["celex"] for r in eurlex.chercher(question, etat=False)], substitut
 
-    def test_un_seul_mot_ecarte_si_un_titre_en_contient_deux(self):
-        lignes = [("32001L0001", "Directive relative à l'environnement marin", "2001-01-01"),
-                  ("32011L0092", "Directive concernant l'évaluation des incidences sur l'environnement",
-                   "2011-12-13"),
-                  ("32020L0002", "Directive relative à l'évaluation de la qualité de l'air", "2020-01-01")]
-        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
-            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)], ["32011L0092"])
+    def test_formes(self):
+        self.assertEqual(eurlex._formes("animaux"), ["animal", "animau", "animaux"])
+        self.assertEqual(eurlex._formes("déchet"), ["déchet", "déchets"])
+        self.assertEqual(eurlex._formes("national"), ["national", "nationals", "nationaux"])
 
-    def test_plus_de_mots_puis_plus_recent(self):
-        lignes = [("32001L0001", "Directive relative à l'évaluation des incidences", "2001-01-01"),
-                  ("32020L0002", "Directive relative à l'évaluation de l'environnement", "2020-01-01"),
-                  ("32011L0092", "Directive concernant l'évaluation des incidences sur l'environnement",
-                   "2011-12-13")]
-        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
-            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)],
-                             ["32011L0092", "32020L0002", "32001L0001"])
+    def test_expression_paires(self):
+        e = eurlex._expression_paires(["conservation", "sauvages", "chasse"])
+        self.assertEqual(e, '(("conservation" OR "conservations") AND ("sauvage" OR "sauvages")) OR '
+                            '(("conservation" OR "conservations") AND ("chasse" OR "chasses")) OR '
+                            '(("sauvage" OR "sauvages") AND ("chasse" OR "chasses"))')
+        self.assertEqual(eurlex._expression_paires(["déchets"]), '("déchet" OR "déchets")')
+
+    def test_requete(self):
+        _, substitut = self.chercher()
+        q = requete_envoyee(substitut)
+        self.assertIn("?title bif:contains '((\"", q)
+        self.assertIn('FILTER(STRSTARTS(STR(?celex), "3"))', q)
+        for d in ("R(", "_SUM", "_RES", "_INF"):
+            self.assertIn(f'!CONTAINS(STR(?celex), "{d}")', q)
+
+    def test_nombre_de_mots_puis_vigueur(self):
+        actes = [("31979L0409", "Directive concernant la conservation des oiseaux sauvages", "1979-04-02"),
+                 ("32009L0147", "Directive concernant la conservation des oiseaux sauvages (version codifiée)", "2009-11-30"),
+                 ("32005D0734", "Décision relative aux oiseaux sauvages", "2005-10-19")]
+        celex, _ = self.chercher(actes=actes, vigueur={"31979L0409": "0", "32009L0147": "1"})
+        self.assertEqual(celex, ["32009L0147", "31979L0409", "32005D0734"])
+
+    def test_type_puis_longueur(self):
+        actes = [("32010D0001", "Décision sur la conservation des oiseaux", "2010-01-01"),
+                 ("32010L0002", "Directive modifiant la directive sur la conservation des oiseaux", "2010-01-01"),
+                 ("32010L0003", "Directive sur la conservation des oiseaux", "2010-01-01"),
+                 ("32010R0004", "Projet de règlement sur la conservation des oiseaux", "2010-01-01")]
+        celex, _ = self.chercher(actes=actes)
+        self.assertEqual(celex, ["32010L0003", "32010L0002", "32010D0001", "32010R0004"])
+
+    def test_actes_puis_jurisprudence(self):
+        actes = [("32009L0147", "Directive concernant la conservation des oiseaux sauvages", "2009-11-30")]
+        arrets = [("62003CA0079", "Affaire C-79/03 : arrêt (communication) oiseaux sauvages chasse", "2005-01-01"),
+                  ("62003CJ0079", "Arrêt de la Cour, Commission contre Espagne, chasse des oiseaux sauvages", "2004-12-09")]
+        celex, _ = self.chercher(actes=actes, arrets=arrets)
+        self.assertEqual(celex, ["32009L0147", "62003CJ0079", "62003CA0079"])
+
+    def test_legislation_seule(self):
+        actes = [("32009L0147", "Directive concernant la conservation des oiseaux sauvages", "2009-11-30")]
+        substitut = aiguillage(actes=actes, arrets=[("62003CJ0079", "Arrêt chasse oiseaux", "2004-12-09")])
+        with mock.patch("urllib.request.urlopen", substitut):
+            r = eurlex.chercher(self.QUESTION, secteurs=("3",), etat=False)
+        self.assertEqual([x["celex"] for x in r], ["32009L0147"])
+
+    def test_k_par_secteur(self):
+        actes = [(f"3201{i}L000{i}", "Directive conservation oiseaux", "2010-01-01") for i in range(5)]
+        arrets = [(f"6201{i}CJ000{i}", "Arrêt conservation oiseaux", "2010-01-01") for i in range(5)]
+        substitut = aiguillage(actes=actes, arrets=arrets)
+        with mock.patch("urllib.request.urlopen", substitut):
+            r = eurlex.chercher(self.QUESTION, k=2, etat=False)
+        self.assertEqual([x["celex"][0] for x in r], ["3", "3", "6", "6"])
+
+    def test_acte_cite_dans_la_question(self):
+        actes = [("32009L0147", "Directive concernant la conservation des oiseaux sauvages", "2009-11-30")]
+        cites = [("31992L0043", "Directive 92/43/CEE concernant la conservation des habitats naturels", "1992-05-21")]
+        celex, _ = self.chercher("conservation des oiseaux sauvages au regard de la directive 92/43/CEE",
+                                 actes=actes, cites=cites)
+        self.assertEqual(celex[0], "31992L0043")
+        self.assertIn("32009L0147", celex)
+
+    def test_actes_phares_en_tete_sans_doublon(self):
+        actes = [("32016R0679", "Règlement relatif à la protection des données à caractère personnel", "2016-04-27"),
+                 ("32018R1725", "Règlement relatif à la protection des données par les institutions", "2018-10-23")]
+        celex, _ = self.chercher("durée de conservation des données au regard du RGPD", actes=actes)
+        self.assertEqual(celex, ["32016R0679", "32018R1725"])
+
+    def test_vigueur_demandee_pour_la_legislation_seulement(self):
+        actes = [("32009L0147", "Directive concernant la conservation des oiseaux sauvages", "2009-11-30")]
+        _, substitut = self.chercher(actes=actes, arrets=[("62003CJ0079", "Arrêt chasse oiseaux", "2004-12-09")])
+        vig = [c for c in substitut.call_args_list if "resource_legal_in-force ?v\n}" in urllib.parse.unquote_plus(c[0][0].full_url)]
+        self.assertEqual(len(vig), 1)
 
 
 class ActesPhares(unittest.TestCase):
@@ -254,13 +335,12 @@ class TousLesTermes(unittest.TestCase):
                   ("32024L1785", "Directive modifiant la directive relative aux émissions", "2024-04-24")]
         self.assertEqual([c for c, _ in self.celex_et_rectificatifs(lignes, k=2)], ["32010L0075", "32024L1785"])
 
-    def test_chercher_inchangee(self):
+    def test_chercher_ne_cherche_pas_d_expression_exacte(self):
+        """chercher demande des paires de mots, non les expressions exactes de chercher_termes."""
         substitut = reponse_sparql([])
         with mock.patch("urllib.request.urlopen", substitut):
             eurlex.chercher("évaluation des incidences sur l'environnement")
-        q = requete_envoyee(substitut)
-        self.assertNotIn("bif:contains", q)
-        self.assertIn(" || ", q.split("FILTER(")[1])
+        self.assertIn(" AND ", requete_envoyee(substitut).split("bif:contains '")[1].split("'")[0])
 
     def test_expressions(self):
         attendus = {"valeur ajoutée": '"valeur ajoutée"',
