@@ -137,6 +137,61 @@ class Sigles(unittest.TestCase):
         self.assertEqual(eurlex._mots("NIS 2"), eurlex._mots("NIS2"))
 
 
+class Classement(unittest.TestCase):
+    """Comportement décrit par la docstring de `chercher` : un titre est retenu s'il contient l'un
+    des mots (OU), ceux qui n'en contiennent qu'un sont écartés dès qu'un autre en contient deux.
+    Titres fictifs."""
+
+    QUESTION = "évaluation des incidences sur l'environnement"
+
+    def test_un_seul_mot_suffit(self):
+        lignes = [("32001L0001", "Directive relative à l'environnement marin", "2001-01-01")]
+        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
+            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)], ["32001L0001"])
+
+    def test_un_seul_mot_ecarte_si_un_titre_en_contient_deux(self):
+        lignes = [("32001L0001", "Directive relative à l'environnement marin", "2001-01-01"),
+                  ("32011L0092", "Directive concernant l'évaluation des incidences sur l'environnement",
+                   "2011-12-13"),
+                  ("32020L0002", "Directive relative à l'évaluation de la qualité de l'air", "2020-01-01")]
+        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
+            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)], ["32011L0092"])
+
+    def test_plus_de_mots_puis_plus_recent(self):
+        lignes = [("32001L0001", "Directive relative à l'évaluation des incidences", "2001-01-01"),
+                  ("32020L0002", "Directive relative à l'évaluation de l'environnement", "2020-01-01"),
+                  ("32011L0092", "Directive concernant l'évaluation des incidences sur l'environnement",
+                   "2011-12-13")]
+        with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
+            self.assertEqual([r["celex"] for r in eurlex.chercher(self.QUESTION)],
+                             ["32011L0092", "32020L0002", "32001L0001"])
+
+
+class ActesPhares(unittest.TestCase):
+    """Chaque acte phare porte sa date. Dates vérifiées le 25/10/2026 sur EUR-Lex (intitulé de
+    l'acte) ; pour le règlement 2022/1925, dont EUR-Lex refuse la lecture automatique, sur un
+    document de la Chambre des représentants de Belgique (DOC 55 3813/001)."""
+
+    DATES = {"32022R2065": "2022-10-19", "32022R1925": "2022-09-14", "32024R1689": "2024-06-13",
+             "32023R2854": "2023-12-13", "32022R0868": "2022-05-30", "32022L2555": "2022-12-14",
+             "32022R2554": "2022-12-14", "32016R0679": "2016-04-27", "32022L2464": "2022-12-14",
+             "32014R0910": "2014-07-23"}
+
+    def test_dates_verifiees(self):
+        self.assertEqual({celex: date for _, celex, date, _ in eurlex._ACTES_PHARES}, self.DATES)
+
+    def test_annee_de_la_date_et_du_numero_celex(self):
+        for _, celex, date, _ in eurlex._ACTES_PHARES:
+            with self.subTest(celex=celex):
+                self.assertRegex(date, r"^\d{4}-\d{2}-\d{2}$")
+                self.assertEqual(date[:4], celex[1:5])
+
+    def test_date_rendue(self):
+        with mock.patch("urllib.request.urlopen", reponse_sparql([])):
+            r = eurlex.chercher("durée de conservation des données au regard du RGPD")
+        self.assertEqual(r[0]["date"], "2016-04-27")
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
@@ -146,6 +201,18 @@ class Structure(unittest.TestCase):
             derniere = ast.parse(f.read()).body[-1]
         self.assertIsInstance(derniere, ast.If)
         self.assertIn("__main__", ast.unparse(derniere.test))
+
+    def test_ensembles_sans_doublon(self):
+        """Un élément écrit deux fois dans un ensemble littéral ne compte qu'une fois : le doublon
+        signale une faute de saisie."""
+        with open(eurlex.__file__, encoding="utf-8") as f:
+            arbre = ast.parse(f.read())
+        for noeud in ast.walk(arbre):
+            if isinstance(noeud, ast.Set):
+                valeurs = [e.value for e in noeud.elts if isinstance(e, ast.Constant)]
+                doublons = sorted({v for v in valeurs if valeurs.count(v) > 1})
+                with self.subTest(ligne=noeud.lineno):
+                    self.assertEqual(doublons, [])
 
 
 if __name__ == "__main__":
