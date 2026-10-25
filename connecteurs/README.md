@@ -118,6 +118,13 @@ acte. Un terme est cherché tel quel
 banc de [`bancs/eurlex/`](../bancs/eurlex/), elle trouve l'acte attendu pour 9
 questions sur 12, `chercher` pour aucune.
 
+Les deux fonctions donnent aussi l'état de chaque acte, en une requête de plus
+(une seconde environ) : `en_vigueur`, `fin_de_validite`, la dernière
+`version_consolidee` (numéro, date, lien) et la liste complète des
+`rectificatifs`. La version consolidée est le texte à lire ; seul le texte publié
+au Journal officiel fait foi. `etat=False` s'en dispense ;
+`eurlex.etat_des_actes([...])` interroge directement des numéros CELEX.
+
 ## Conseil constitutionnel : les QPC en instance
 
 ```python

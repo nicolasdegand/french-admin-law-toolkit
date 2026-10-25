@@ -5,7 +5,8 @@ Recherche dans les titres français. `chercher` part d'une question rédigée
 librement (législation et jurisprudence de l'Union, secteurs CELEX 3 et 6) ;
 `chercher_termes` part de termes choisis par l'appelant, qui doivent tous figurer
 dans le titre (législation par défaut). Aucune authentification. Renvoie
-référence, type, titre, date et lien EUR-Lex.
+référence, type, titre, date et lien EUR-Lex, et l'état de chaque acte (en
+vigueur, fin de validité, dernière version consolidée, rectificatifs).
 """
 import re, urllib.request, urllib.parse, json
 
@@ -181,19 +182,19 @@ def _resultat(celex, titre, date):
             "type": _type_celex(celex), "titre": titre[:220], "date": date, "lien": _lien(celex)}
 
 
-def chercher(question, k=6, secteurs=("3", "6"), timeout=60):
+def chercher(question, k=6, secteurs=("3", "6"), timeout=60, etat=True):
     """Recherche EUR-Lex. Réponse directe aux actes « phares » détectés par sigle (DSA, DMA,
     AI Act…), complétée par une recherche par mots-clés dans les titres FR : un titre est retenu
     s'il contient l'un des mots (OU) ; les titres sont classés par nombre de mots présents, puis
     du plus récent au plus ancien, et ceux qui n'en contiennent qu'un sont écartés dès qu'un
     autre en contient au moins deux. Renvoie une liste de {reference, celex, type, titre, date,
-    lien}.
+    lien}, complétée par l'état de chaque acte si `etat` est vrai (voir `etat_des_actes`).
     Si le point d'accès ne répond pas (réseau, délai dépassé, erreur HTTP), l'erreur remonte, comme
     dans les fonctions de recherche de legifrance.py : une panne n'est pas un résultat vide."""
     phares = _phares(question)
     mots = _mots(question)
     if not mots:
-        return phares[:k]
+        return _avec_etat(phares[:k], timeout) if etat else phares[:k]
     ors = " || ".join(f'CONTAINS(LCASE(STR(?title)), "{m}")' for m in mots)
     filtres = f"  FILTER({ors})"
     sect = " || ".join(f'STRSTARTS(STR(?celex),"{s}")' for s in secteurs)
@@ -221,7 +222,8 @@ SELECT DISTINCT ?celex ?title ?date WHERE {{
         if celex in dejacelex:
             continue
         out.append(_resultat(celex, title, date))
-    return out[:max(k, len(phares))]
+    out = out[:max(k, len(phares))]
+    return _avec_etat(out, timeout) if etat else out
 
 
 
@@ -239,7 +241,7 @@ def _expression_plein_texte(terme):
 _RE_RECTIFICATIF = re.compile(r"^(.+)R\(\d+\)$")
 
 
-def chercher_termes(termes, k=6, secteurs=("3",), timeout=60):
+def chercher_termes(termes, k=6, secteurs=("3",), timeout=60, etat=True):
     """Recherche EUR-Lex des documents dont le titre français contient TOUS les termes (ET),
     choisis par l'appelant : ni extraction de mots, ni remplacement de sigles, ni actes phares.
 
@@ -251,12 +253,14 @@ def chercher_termes(termes, k=6, secteurs=("3",), timeout=60):
 
     Par défaut, la législation seule (secteur 3) ; secteurs=("3", "6") y ajoute la jurisprudence.
     Un rectificatif trouvé avec son acte (numéro de l'acte suivi de « R(nn) ») ne prend pas de
-    place dans les résultats : son numéro figure dans le champ `rectificatifs` de l'acte. Ce champ
-    ne liste que les rectificatifs dont le titre contient les termes : vide, il ne prouve pas
-    qu'il n'en existe aucun. Les résumés d'arrêts (« _SUM »), qui doublent l'arrêt, sont écartés.
+    place dans les résultats : son numéro figure dans le champ `rectificatifs` de l'acte. Les
+    résumés d'arrêts (« _SUM »), qui doublent l'arrêt, sont écartés.
     Mesure sur un banc de questions : bancs/eurlex/.
     Renvoie une liste de {reference, celex, type, titre, date, lien, rectificatifs}, vide si aucun
-    terme n'est donné. Si le point d'accès ne répond pas, l'erreur remonte, comme dans
+    terme n'est donné. Si `etat` est vrai, chaque acte porte en outre son état (voir
+    `etat_des_actes`) et `rectificatifs` la liste complète de ses rectificatifs ; sinon, ce
+    champ ne liste que ceux dont le titre contient les termes, et vide il ne prouve pas qu'il
+    n'en existe aucun. Si le point d'accès ne répond pas, l'erreur remonte, comme dans
     `chercher`."""
     if isinstance(termes, str):
         termes = [termes]
@@ -286,7 +290,90 @@ SELECT DISTINCT ?celex ?title ?date ?sc WHERE {{
             out.append(_resultat(celex, titre, date))
     for r in out:
         r["rectificatifs"] = rectificatifs.get(r["celex"], [])
-    return out[:k]
+    return _avec_etat(out[:k], timeout) if etat else out[:k]
+
+
+
+# Date de fin de validité que Cellar donne aux actes sans terme.
+_SANS_FIN = "9999-12-31"
+
+
+def etat_des_actes(celex, timeout=60):
+    """État de chaque acte, en une seule requête : {celex: {en_vigueur, fin_de_validite,
+    version_consolidee, rectificatifs}}.
+
+    - en_vigueur : True ou False selon Cellar, None si Cellar n'en dit rien (jurisprudence…) ;
+    - fin_de_validite : date AAAA-MM-JJ, None si l'acte est sans terme ;
+    - version_consolidee : la plus récente, {celex, date, lien}, None s'il n'y en a pas. Une
+      version consolidée est un outil de documentation : seul le texte publié au Journal
+      officiel fait foi ;
+    - rectificatifs : numéros CELEX de tous les rectificatifs de l'acte, liste complète.
+
+    Cellar rattache à un acte, outre ses propres versions consolidées, celles d'actes qu'il
+    modifie ou abroge : seules comptent celles dont le numéro reprend celui de l'acte (secteur 0,
+    « 02010L0075-20240804 » pour 32010L0075). Une panne lève l'erreur."""
+    celex = [c for c in dict.fromkeys(celex) if c and re.fullmatch(r"[0-9A-Z()_.-]+", c)]
+    etats = {c: {"en_vigueur": None, "fin_de_validite": None, "version_consolidee": None,
+                 "rectificatifs": []} for c in celex}
+    if not celex:
+        return etats
+    liste = ", ".join(f'"{c}"' for c in celex)
+    q = f'''PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
+SELECT ?bc ?genre ?v ?c ?d WHERE {{
+  ?base cdm:resource_legal_id_celex ?bc .
+  FILTER(STR(?bc) IN ({liste}))
+  {{ BIND("etat" AS ?genre)
+     OPTIONAL {{ ?base cdm:resource_legal_in-force ?v }}
+     OPTIONAL {{ ?base cdm:resource_legal_date_end-of-validity ?d }} }}
+  UNION
+  {{ BIND("consolidee" AS ?genre)
+     ?x cdm:act_consolidated_consolidates_resource_legal ?base .
+     ?x cdm:resource_legal_id_celex ?c }}
+  UNION
+  {{ BIND("rectificatif" AS ?genre)
+     ?x cdm:resource_legal_corrects_resource_legal ?base .
+     ?x cdm:resource_legal_id_celex ?c }}
+}}'''
+    url = ENDPOINT + "?" + urllib.parse.urlencode({"query": q, "format": "application/sparql-results+json"})
+    req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
+                                               "User-Agent": "Mozilla/5.0"})
+    js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    for b in js.get("results", {}).get("bindings", []):
+        val = {k: v.get("value", "") for k, v in b.items()}
+        e = etats.get(val.get("bc"))
+        if e is None:
+            continue
+        genre = val.get("genre")
+        if genre == "etat":
+            if val.get("v"):
+                e["en_vigueur"] = val["v"].lower() in ("1", "true")
+            fin = val.get("d", "")[:10]
+            if fin and fin != _SANS_FIN:
+                e["fin_de_validite"] = fin
+        elif genre == "rectificatif" and val.get("c") and val["c"] not in e["rectificatifs"]:
+            e["rectificatifs"].append(val["c"])
+        elif genre == "consolidee":
+            m = re.fullmatch(re.escape("0" + val["bc"][1:]) + r"-(\d{4})(\d{2})(\d{2})", val.get("c", ""))
+            if m:
+                date = "-".join(m.groups())
+                if not e["version_consolidee"] or date > e["version_consolidee"]["date"]:
+                    e["version_consolidee"] = {"celex": val["c"], "date": date, "lien": _lien(val["c"])}
+    for e in etats.values():
+        e["rectificatifs"].sort()
+    return etats
+
+
+def _avec_etat(resultats, timeout):
+    """Ajoute à chaque résultat l'état de l'acte (`etat_des_actes`), en une requête. Les
+    rectificatifs déjà rattachés au résultat sont conservés."""
+    if not resultats:
+        return resultats
+    etats = etat_des_actes([r["celex"] for r in resultats], timeout)
+    for r in resultats:
+        e = dict(etats.get(r["celex"]) or {})
+        e["rectificatifs"] = sorted(set(r.get("rectificatifs", [])) | set(e.get("rectificatifs", [])))
+        r.update(e)
+    return resultats
 
 
 if __name__ == "__main__":

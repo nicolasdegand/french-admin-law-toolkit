@@ -118,6 +118,13 @@ default, corrigenda attached to their act. A term is searched as is ("projet" do
 words of the title. On the bench in [`bancs/eurlex/`](../bancs/eurlex/), it finds
 the expected act for 9 questions out of 12, `chercher` for none.
 
+Both functions also give the state of each act, with one more query (about a
+second): `en_vigueur` (in force), `fin_de_validite` (end of validity), the latest
+`version_consolidee` (consolidated version: number, date, link) and the full list
+of `rectificatifs` (corrigenda). The consolidated version is the text to read;
+only the text published in the Official Journal is authentic. `etat=False` skips
+it; `eurlex.etat_des_actes([...])` queries CELEX numbers directly.
+
 ## Constitutional Council: pending QPC
 
 ```python
