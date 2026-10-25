@@ -117,7 +117,12 @@ classés par pertinence, législation par défaut, rectificatifs rattachés à l
 acte. Un terme est cherché tel quel
 (« projet » ne trouve pas « projets ») : reprenez les mots de l'intitulé. Sur le
 banc de [`bancs/eurlex/`](../bancs/eurlex/), elle trouve l'acte attendu pour 9
-questions sur 12, `chercher` pour aucune.
+questions sur 12, sur le banc de réglage comme sur le banc de contrôle.
+`chercher`, qui part de la question, rend les actes d'abord, puis la
+jurisprudence ; elle trouve l'acte attendu pour 9 questions sur 12 sur le banc qui
+a servi à la régler, 5 sur le banc de contrôle : une question rédigée en termes
+de droit français (« SDAGE », « étude d'impact ») ne rencontre pas le vocabulaire
+des actes de l'Union.
 
 Les deux fonctions donnent aussi l'état de chaque acte, en une requête de plus
 (une seconde environ) : `en_vigueur`, `fin_de_validite`, la dernière

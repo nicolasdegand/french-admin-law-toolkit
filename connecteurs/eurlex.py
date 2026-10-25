@@ -184,48 +184,132 @@ def _resultat(celex, titre, date):
             "type": _type_celex(celex), "titre": titre[:220], "date": date, "lien": _lien(celex)}
 
 
-def chercher(question, k=6, secteurs=("3", "6"), timeout=60, etat=True):
-    """Recherche EUR-Lex. Réponse directe aux actes « phares » détectés par sigle (DSA, DMA,
-    AI Act…), complétée par une recherche par mots-clés dans les titres FR : un titre est retenu
-    s'il contient l'un des mots (OU) ; les titres sont classés par nombre de mots présents, puis
-    du plus récent au plus ancien, et ceux qui n'en contiennent qu'un sont écartés dès qu'un
-    autre en contient au moins deux. Renvoie une liste de {reference, celex, type, titre, date,
-    lien}, complétée par l'état de chaque acte si `etat` est vrai (voir `etat_des_actes`).
-    Si le point d'accès ne répond pas (réseau, délai dépassé, erreur HTTP), l'erreur remonte, comme
-    dans les fonctions de recherche de legifrance.py : une panne n'est pas un résultat vide."""
-    phares = _phares(question)
-    mots = _mots(question)
-    if not mots:
-        return _avec_etat(phares[:k], timeout) if etat else phares[:k]
-    ors = " || ".join(f'CONTAINS(LCASE(STR(?title)), "{m}")' for m in mots)
-    filtres = f"  FILTER({ors})"
-    sect = " || ".join(f'STRSTARTS(STR(?celex),"{s}")' for s in secteurs)
-    q = f'''PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
-SELECT DISTINCT ?celex ?title ?date WHERE {{
+def _formes(mot):
+    """Le mot et sa forme au pluriel ou au singulier, écrites en toutes lettres (l'index plein
+    texte compare des mots entiers ; un joker « mot* » s'y est révélé beaucoup trop lent). Règles
+    sommaires : une forme inexistante (« oiseal » pour « oiseaux ») est sans effet sur la
+    recherche."""
+    f = {mot, mot[:-1] if mot.endswith(("s", "x")) else mot + "s"}
+    if mot.endswith("al"):
+        f.add(mot[:-2] + "aux")
+    if mot.endswith("aux"):
+        f.add(mot[:-3] + "al")
+    return sorted(f)
+
+
+def _expression_paires(mots, n=6):
+    """Expression pour l'index plein texte : titres qui contiennent au moins deux des `n` premiers
+    mots, chacun sous l'une de ses formes ; un seul mot s'il n'y en a qu'un."""
+    groupes = ["(" + " OR ".join(f'"{f}"' for f in _formes(m)) + ")" for m in mots[:n]]
+    if len(groupes) == 1:
+        return groupes[0]
+    return " OR ".join(f"({a} AND {b})" for i, a in enumerate(groupes) for b in groupes[i + 1:])
+
+
+# Numéros CELEX qui doublent un autre document : rectificatif (« R(01) »), résumé (« _SUM »,
+# « _RES »), fiche d'information (« _INF »).
+_DOUBLONS = ("R(", "_SUM", "_RES", "_INF")
+
+
+def _candidats(expression, secteur, timeout, limite=100):
+    """Titres d'un secteur CELEX qui répondent à l'expression, par l'index plein texte."""
+    doublons = " && ".join(f'!CONTAINS(STR(?celex), "{d}")' for d in _DOUBLONS)
+    q = f"""PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
+SELECT DISTINCT ?celex ?title ?date ?sc WHERE {{
+  ?exp cdm:expression_title ?title .
+  ?title bif:contains '{expression}' OPTION (score ?sc) .
   ?exp cdm:expression_uses_language <{_FRA}> ;
-       cdm:expression_title ?title ;
        cdm:expression_belongs_to_work ?work .
   ?work cdm:resource_legal_id_celex ?celex .
   OPTIONAL {{ ?work cdm:work_date_document ?date }}
-{filtres}
-  FILTER({sect})
-}} LIMIT {max(k*8, 40)}'''
-    cand = [(sum(1 for m in mots if m in title.lower()), date, celex, title)   # nombre de termes présents
-            for celex, title, date in _executer(q, timeout)]
-    cand = [c for c in cand if c[0] > 0]                         # au moins un terme de la requête présent
-    if cand:
-        mx = max(c[0] for c in cand)
-        if mx >= 2:                                              # écarte le bruit à un seul terme générique
-            cand = [c for c in cand if c[0] >= 2]
-    cand.sort(key=lambda x: (x[0], x[1]), reverse=True)          # plus de termes d'abord, puis plus récent
-    out = list(phares)                                          # actes phares en tête
-    dejacelex = {p["celex"] for p in phares}
-    for score, date, celex, title in cand[:k]:
-        if celex in dejacelex:
-            continue
-        out.append(_resultat(celex, title, date))
-    out = out[:max(k, len(phares))]
-    return _avec_etat(out, timeout) if etat else out
+  FILTER(STRSTARTS(STR(?celex), "{secteur}"))
+  FILTER({doublons})
+}} ORDER BY DESC(?sc) LIMIT {limite}"""
+    return _executer(q, timeout)
+
+
+def _en_vigueur(celex, timeout):
+    """{celex: True ou False} pour les actes dont Cellar indique s'ils sont en vigueur."""
+    if not celex:
+        return {}
+    q = f"""PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
+SELECT ?bc ?v WHERE {{
+  VALUES ?bc {{ {_valeurs_celex(celex)} }}
+  ?base cdm:resource_legal_id_celex ?bc .
+  ?base cdm:resource_legal_in-force ?v
+}}"""
+    url = ENDPOINT + "?" + urllib.parse.urlencode({"query": q, "format": "application/sparql-results+json"})
+    req = urllib.request.Request(url, headers={"Accept": "application/sparql-results+json",
+                                               "User-Agent": "Mozilla/5.0"})
+    js = json.loads(urllib.request.urlopen(req, timeout=timeout).read())
+    out = {}
+    for b in js.get("results", {}).get("bindings", []):
+        if "bc" in b and "v" in b:
+            out[b["bc"]["value"]] = b["v"]["value"].lower() in ("1", "true")
+    return out
+
+
+def _rang_type(celex):
+    """Législation : directives et règlements, puis décisions, puis recommandations, puis le
+    reste. Jurisprudence : arrêts, conclusions et ordonnances, puis communications au JO."""
+    if celex[:1] == "3" and len(celex) > 5:
+        return {"L": 0, "R": 0, "D": 1, "F": 1, "H": 2}.get(celex[5], 3)
+    if celex[:1] == "6" and len(celex) > 6:
+        return 0 if celex[6] in "JCO" else 1
+    return 3
+
+
+def _classer(mots, lignes, vigueur):
+    """Classement des titres candidats : nombre de mots de la question présents (sous l'une de
+    leurs formes), puis actes en vigueur avant actes abrogés, puis « projets » et rectificatifs
+    après les actes, puis selon le type (`_rang_type`), puis titre le plus court (l'acte de base
+    a souvent un titre plus court que les actes qui le modifient ou l'appliquent)."""
+    def cle(ligne):
+        celex, titre, _ = ligne
+        t = titre.lower()
+        presents = sum(1 for m in mots if any(f in t for f in _formes(m)))
+        return (-presents, vigueur.get(celex) is False, t.startswith(("projet", "rectificatif")),
+                _rang_type(celex), len(titre))
+    return sorted(lignes, key=cle)
+
+
+def chercher(question, k=6, secteurs=("3", "6"), timeout=60, etat=True):
+    """Recherche EUR-Lex à partir d'une question rédigée librement.
+
+    Sont rendus, dans cet ordre, sans doublon :
+    1. les actes « phares » reconnus par leur sigle (RGPD, DSA, AI Act…) ;
+    2. l'acte ou l'affaire dont la question cite le numéro (« la directive 2011/92/UE… »), par
+       `resoudre` ;
+    3. pour chaque secteur CELEX de `secteurs`, dans l'ordre (législation, puis jurisprudence par
+       défaut), jusqu'à `k` documents dont le titre contient au moins deux mots de la question,
+       trouvés par l'index plein texte et classés par `_classer`.
+    Les actes d'abord, la jurisprudence ensuite : mélangés, les titres d'arrêts, qui reprennent le
+    sommaire de l'affaire, passaient devant les actes. Mesure sur deux bancs de questions :
+    bancs/eurlex/. Pour un acte connu, `resoudre` est plus sûre ; pour un thème, `chercher_termes`,
+    avec les mots de l'intitulé : une question rédigée en termes de droit français (« SDAGE »,
+    « étude d'impact ») ne rencontre pas le vocabulaire des actes de l'Union.
+
+    Renvoie une liste de {reference, celex, type, titre, date, lien}, complétée par l'état de
+    chaque acte si `etat` est vrai (voir `etat_des_actes`).
+    Si le point d'accès ne répond pas (réseau, délai dépassé, erreur HTTP), l'erreur remonte, comme
+    dans les fonctions de recherche de legifrance.py : une panne n'est pas un résultat vide."""
+    out = list(_phares(question))
+    cite = resoudre(question, etat=False, timeout=timeout) if _lire_reference(question)[0] in ("acte", "affaire") else None
+    if cite:
+        out += cite["resultats"]
+    mots = [m for m in _mots(question) if not m.isdigit()]
+    if mots:
+        expression = _expression_paires(mots)
+        for secteur in secteurs:
+            lignes = _candidats(expression, secteur, timeout)
+            vigueur = _en_vigueur([c for c, _, _ in lignes], timeout) if secteur == "3" else {}
+            out += [_resultat(c, t, d) for c, t, d in _classer(mots, lignes, vigueur)[:k]]
+    vus, uniques = set(), []
+    for r in out:
+        if r["celex"] not in vus:
+            vus.add(r["celex"])
+            uniques.append(r)
+    return _avec_etat(uniques, timeout) if etat else uniques
 
 
 
