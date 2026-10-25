@@ -10,24 +10,67 @@ import re, urllib.request, urllib.parse, json
 ENDPOINT = "https://publications.europa.eu/webapi/rdf/sparql"
 _FRA = "http://publications.europa.eu/resource/authority/language/FRA"
 
-# libellés des descripteurs CELEX les plus courants
-_TYPE = {
-    "R": "Règlement", "L": "Directive", "D": "Décision", "H": "Recommandation",
-    "A": "Accord", "M": "Mesure", "X": "Autre",
-    "CJ": "Arrêt (Cour de justice)", "CO": "Ordonnance (Cour de justice)",
-    "CC": "Conclusions de l'avocat général", "TJ": "Arrêt (Tribunal)",
-    "TO": "Ordonnance (Tribunal)", "CB": "Ordonnance", "CN": "Affaire (communication)",
+# Libellés des descripteurs CELEX (type de document), repris de la page d'EUR-Lex « Types de
+# documents dans EUR-Lex » en français (consultée le 25/10/2026) :
+#   https://eur-lex.europa.eu/content/tools/TableOfSectors/types_of_documents_in_eurlex.html?locale=fr
+# au singulier (la page nomme des catégories : « Règlements »), avec l'auteur entre parenthèses pour
+# la jurisprudence. Les « communications » du secteur 6 sont des avis publiés au JO (nouvelle
+# affaire, arrêt, ordonnance), non des décisions : leur libellé le dit.
+_TYPE_LEGISLATION = {          # secteur 3, actes juridiques, une lettre
+    "A": "Avis", "B": "Budget", "C": "Déclaration", "D": "Décision",
+    "E": "PESC : position commune, action commune ou stratégie commune (titre V du traité UE pré-Lisbonne)",
+    "F": "Coopération policière et judiciaire en matière pénale (titre VI du traité UE pré-Lisbonne)",
+    "G": "Résolution", "H": "Recommandation",
+    "J": "Non-opposition à une entreprise commune notifiée", "K": "Recommandation CECA",
+    "L": "Directive", "M": "Non-opposition à une concentration notifiée",
+    "O": "Orientation de la BCE", "Q": "Disposition institutionnelle (règlement intérieur, accord interne)",
+    "R": "Règlement", "S": "Décision de portée générale CECA",
+    "X": "Autre document publié au JO L (ou avant 1967)", "Y": "Autre document publié au JO C",
 }
+_TYPE_JURISPRUDENCE = {        # secteur 6, jurisprudence de l'Union, deux lettres : C = Cour de
+    # justice, T = Tribunal, F = Tribunal de la fonction publique (dissous le 1er septembre 2016)
+    "CJ": "Arrêt (Cour de justice)", "CO": "Ordonnance (Cour de justice)",
+    "CC": "Conclusions de l'avocat général (Cour de justice)", "CS": "Saisie-arrêt (Cour de justice)",
+    "CT": "Tierce opposition (Cour de justice)", "CV": "Avis (Cour de justice)",
+    "CX": "Délibération (Cour de justice)", "CD": "Décision (Cour de justice)",
+    "CP": "Prise de position (Cour de justice)", "CN": "Communication : nouvelle affaire (Cour de justice)",
+    "CA": "Communication : arrêt (Cour de justice)", "CB": "Communication : ordonnance (Cour de justice)",
+    "CU": "Communication : demande d'avis (Cour de justice)", "CG": "Communication : avis (Cour de justice)",
+    "TJ": "Arrêt (Tribunal)", "TO": "Ordonnance (Tribunal)",
+    "TC": "Conclusions de l'avocat général (Tribunal)", "TT": "Tierce opposition (Tribunal)",
+    "TN": "Communication : nouvelle affaire (Tribunal)", "TA": "Communication : arrêt (Tribunal)",
+    "TB": "Communication : ordonnance (Tribunal)",
+    "FJ": "Arrêt (Tribunal de la fonction publique)", "FO": "Ordonnance (Tribunal de la fonction publique)",
+    "FT": "Tierce opposition (Tribunal de la fonction publique)",
+    "FN": "Communication : nouvelle affaire (Tribunal de la fonction publique)",
+    "FA": "Communication : arrêt (Tribunal de la fonction publique)",
+    "FB": "Communication : ordonnance (Tribunal de la fonction publique)",
+}
+_TYPE_ACCORDS = {              # secteur 2, accords internationaux
+    "A": "Accord avec un pays tiers ou une organisation internationale",
+    "D": "Acte d'un organe créé par un accord international",
+    "P": "Acte d'un organe parlementaire créé par un accord international", "X": "Autre acte",
+}
+_TYPE_COMPLEMENTAIRE = {       # secteur 4, législation complémentaire
+    "A": "Accord entre États membres",
+    "D": "Décision des représentants des gouvernements des États membres",
+    "X": "Autre acte publié au JO L", "Y": "Autre acte publié au JO C", "Z": "Législation complémentaire",
+}
+_TYPE_PAR_SECTEUR = {"2": _TYPE_ACCORDS, "3": _TYPE_LEGISLATION, "4": _TYPE_COMPLEMENTAIRE}
 
 
 def _type_celex(celex):
+    """Type de document d'après le numéro CELEX : secteur (1er chiffre) et descripteur (lettres
+    qui suivent l'année). « 32016R0679 » -> Règlement ; « 62019CJ0123 » -> Arrêt (Cour de justice)."""
     m = re.match(r"^([1-9])(\d{4})([A-Z]{1,2})", celex or "")
     if not m:
         return "Document"
     sect, _, desc = m.groups()
     if sect == "6":
-        return _TYPE.get(desc, "Jurisprudence de l'Union")
-    return _TYPE.get(desc[:1], "Acte de l'Union")
+        return _TYPE_JURISPRUDENCE.get(desc, "Jurisprudence de l'Union")
+    if sect == "5":
+        return "Document préparatoire"
+    return _TYPE_PAR_SECTEUR.get(sect, {}).get(desc[:1], "Acte de l'Union")
 
 
 def _lien(celex):
