@@ -301,6 +301,30 @@ class ConversionDesDates(unittest.TestCase):
             legifrance._iso(legifrance._ms("2024-03-15"))
 
 
+class TermesDeRecherche(unittest.TestCase):
+    """chercher_termes envoie à Légifrance les termes séparés par des espaces, qu'ils soient
+    donnés en liste ou en une seule chaîne (forme de l'exemple du README)."""
+
+    def valeur_envoyee(self, termes):
+        charges = []
+        with mock.patch.object(legifrance, "_post", lambda chemin, charge: charges.append(charge) or {}):
+            legifrance.chercher_termes(termes)
+        return charges[0]["recherche"]["champs"][0]["criteres"][0]["valeur"] if charges else None
+
+    def test_chaine(self):
+        self.assertEqual(self.valeur_envoyee("obligation de motivation refus protection fonctionnelle"),
+                         "obligation de motivation refus protection fonctionnelle")
+
+    def test_liste(self):
+        self.assertEqual(self.valeur_envoyee(["obligation de motivation", "protection fonctionnelle"]),
+                         "obligation de motivation protection fonctionnelle")
+
+    def test_sans_terme_pas_de_requete(self):
+        for termes in ("", "   ", [], None):
+            with self.subTest(termes=termes):
+                self.assertIsNone(self.valeur_envoyee(termes))
+
+
 class Structure(unittest.TestCase):
     """La démonstration (`if __name__ == "__main__":`) est la dernière instruction du fichier :
     une fonction définie après elle n'existerait pas encore quand elle s'exécute."""
