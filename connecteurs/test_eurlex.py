@@ -367,7 +367,8 @@ class EtatDesActes(unittest.TestCase):
     def test_une_seule_requete(self):
         _, substitut = self.etats(["32010L0075", "32001L0080", "32010L0075"])
         self.assertEqual(substitut.call_count, 1)
-        self.assertIn('FILTER(STR(?bc) IN ("32010L0075", "32001L0080"))', requete_envoyee(substitut))
+        x = "^^<http://www.w3.org/2001/XMLSchema#string>"
+        self.assertIn(f'VALUES ?bc {{ "32010L0075"{x} "32001L0080"{x} }}', requete_envoyee(substitut))
 
     def test_numero_invalide_ecarte(self):
         e, substitut = self.etats(['32010L0075") || ("x', ""])

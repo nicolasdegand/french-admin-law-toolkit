@@ -298,6 +298,14 @@ SELECT DISTINCT ?celex ?title ?date ?sc WHERE {{
 _SANS_FIN = "9999-12-31"
 
 
+def _valeurs_celex(celex):
+    """Numéros CELEX pour une clause VALUES. Cellar les enregistre comme littéraux xsd:string :
+    écrits ainsi, ils sont trouvés par l'index (un dixième de seconde), alors qu'un filtre sur
+    STR(?celex) parcourt tous les numéros (plusieurs secondes) et qu'un littéral sans type ne
+    trouve rien."""
+    return " ".join(f'"{c}"^^<http://www.w3.org/2001/XMLSchema#string>' for c in celex)
+
+
 def etat_des_actes(celex, timeout=60):
     """État de chaque acte, en une seule requête : {celex: {en_vigueur, fin_de_validite,
     version_consolidee, rectificatifs}}.
@@ -317,11 +325,10 @@ def etat_des_actes(celex, timeout=60):
                  "rectificatifs": []} for c in celex}
     if not celex:
         return etats
-    liste = ", ".join(f'"{c}"' for c in celex)
     q = f'''PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
 SELECT ?bc ?genre ?v ?c ?d WHERE {{
+  VALUES ?bc {{ {_valeurs_celex(celex)} }}
   ?base cdm:resource_legal_id_celex ?bc .
-  FILTER(STR(?bc) IN ({liste}))
   {{ BIND("etat" AS ?genre)
      OPTIONAL {{ ?base cdm:resource_legal_in-force ?v }}
      OPTIONAL {{ ?base cdm:resource_legal_date_end-of-validity ?d }} }}
