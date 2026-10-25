@@ -7,8 +7,10 @@ librement (législation et jurisprudence de l'Union, secteurs CELEX 3 et 6) ;
 dans le titre (législation par défaut). Aucune authentification. Renvoie
 référence, type, titre, date et lien EUR-Lex, et l'état de chaque acte (en
 vigueur, fin de validité, dernière version consolidée, rectificatifs).
+`resoudre` retrouve un acte ou une affaire par son numéro (« directive
+2011/92/UE », « C-461/17 », numéro CELEX).
 """
-import re, urllib.request, urllib.parse, json
+import datetime, re, urllib.request, urllib.parse, json
 
 ENDPOINT = "https://publications.europa.eu/webapi/rdf/sparql"
 _FRA = "http://publications.europa.eu/resource/authority/language/FRA"
@@ -381,6 +383,119 @@ def _avec_etat(resultats, timeout):
         e["rectificatifs"] = sorted(set(r.get("rectificatifs", [])) | set(e.get("rectificatifs", [])))
         r.update(e)
     return resultats
+
+
+
+# --- Résolution d'une référence : numéro d'acte, numéro d'affaire, numéro CELEX ----------------
+
+# Type d'acte -> lettre du numéro CELEX (secteur 3).
+_LETTRE_ACTE = {"règlement": "R", "directive": "L", "décision": "D", "décision-cadre": "F",
+                "recommandation": "H"}
+_RE_ACTE = re.compile(
+    r"\b(règlement|directive|décision-cadre|décision|recommandation)\b"
+    r"[^0-9/]{0,60}?(n[°º]\s*|no\s+)?(\d{1,4})\s*/\s*(\d{1,4})\b", re.IGNORECASE)
+# Affaire : C- (Cour de justice), T- (Tribunal), F- (Tribunal de la fonction publique).
+_RE_AFFAIRE = re.compile(r"\b([CTF])\s*-\s*(\d{1,4})\s*/\s*(\d{2}|\d{4})\b")
+_DOCUMENTS_AFFAIRE = {"C": ("CJ", "CC", "CO"), "T": ("TJ", "TO"), "F": ("FJ", "FO")}
+_RE_CELEX = re.compile(r"[0-9]\d{4}[A-Z]{1,2}\d{4}(?:\(\d{2}\))?|0\d{4}[A-Z]\d{4}-\d{8}")
+_ANNEE_COURANTE = datetime.date.today().year
+
+
+def _annee(texte):
+    """Année écrite sur deux chiffres (numérotation antérieure à 1999) ou quatre."""
+    return 1900 + int(texte) if len(texte) == 2 else int(texte)
+
+
+def _lire_reference(reference):
+    """Référence -> (genre, numéros CELEX à chercher, numéro attendu dans le titre).
+
+    genre : "celex", "acte" ou "affaire" ; None si la référence n'est pas reconnue. Pour un acte,
+    le premier numéro est celui du type cité, les suivants ceux des autres types (même année,
+    même numéro), pour signaler une référence qui se trompe de type.
+
+    Règles de numérotation : depuis 2015, tous les actes sont numérotés (UE) AAAA/N. Avant,
+    directives, recommandations et décisions-cadres portent l'année en premier (92/43/CEE,
+    2008/98/CE), les règlements le numéro en premier (n° 1013/2006), les décisions l'année en
+    premier, sauf celles qui sont numérotées « n° » (décision n° 1386/2013/UE)."""
+    texte = re.sub(r"[‐-―−]", "-", reference or "").strip()
+    if _RE_CELEX.fullmatch(texte.upper()):
+        return "celex", [texte.upper()], None
+    m = _RE_AFFAIRE.search(texte)
+    if m:
+        cour, numero, an = m.group(1), int(m.group(2)), m.group(3)
+        annee = (1900 if int(an) >= 54 else 2000) + int(an) if len(an) == 2 else int(an)
+        return "affaire", [f"6{annee}{d}{numero:04d}" for d in _DOCUMENTS_AFFAIRE[cour]], None
+    m = _RE_ACTE.search(texte)
+    if not m:
+        return None, [], None
+    type_acte, numero_d_abord = m.group(1).lower(), bool(m.group(2))
+    a, b = m.group(3), m.group(4)
+    if type_acte == "règlement":
+        annee_d_abord = len(a) == 4 and 2015 <= int(a) <= _ANNEE_COURANTE + 1
+    elif type_acte == "décision":
+        annee_d_abord = not numero_d_abord
+    else:
+        annee_d_abord = True
+    annee, numero = (_annee(a), int(b)) if annee_d_abord else (_annee(b), int(a))
+    if numero > 9999:
+        return None, [], None
+    lettres = [_LETTRE_ACTE[type_acte]] + [l for l in "RLD" if l != _LETTRE_ACTE[type_acte]]
+    return "acte", [f"3{annee}{l}{numero:04d}" for l in lettres], (annee, numero)
+
+
+def _titre_reprend(titre, annee, numero):
+    """Le titre cite-t-il le numéro (année et numéro, dans un ordre ou l'autre) ?"""
+    an = rf"(?:{annee}|{annee % 100:02d})"
+    num = rf"0*{numero}"
+    return bool(re.search(rf"(?<!\d){an}\s*/\s*{num}(?!\d)|(?<!\d){num}\s*/\s*{an}(?!\d)", titre))
+
+
+def resoudre(reference, etat=True, timeout=60):
+    """Retrouve dans EUR-Lex l'acte ou l'affaire que désigne une référence, telle qu'on l'écrit :
+    « directive 2011/92/UE », « règlement (CE) n° 1013/2006 », « directive 92/43/CEE »,
+    « décision n° 1386/2013/UE », « C-461/17 », ou un numéro CELEX.
+
+    Le numéro CELEX est déduit de la référence, puis son existence vérifiée dans Cellar. Rend
+    {demande, trouve, resultats, autres, message} :
+    - trouve : l'acte ou l'affaire existe ;
+    - resultats : l'acte, ou les documents de l'affaire (arrêt, conclusions, ordonnances), avec
+      les champs de `chercher` et, si `etat` est vrai, leur état (voir `etat_des_actes`) ;
+    - autres : seulement si l'acte est introuvable sous le type cité, les actes de même année et
+      de même numéro sous un autre type (« directive 2016/679 » : le règlement 2016/679 existe) ;
+    - message : ce qui ne va pas (référence non reconnue, introuvable, titre qui ne reprend pas
+      le numéro cité), sinon None.
+    Si le point d'accès ne répond pas, l'erreur remonte."""
+    genre, candidats, numero_attendu = _lire_reference(reference)
+    reponse = {"demande": reference, "trouve": False, "resultats": [], "autres": [], "message": None}
+    if not genre:
+        reponse["message"] = "Référence non reconnue : ni numéro d'acte, ni numéro d'affaire, ni numéro CELEX."
+        return reponse
+    q = f"""PREFIX cdm: <http://publications.europa.eu/ontology/cdm#>
+SELECT DISTINCT ?celex ?title ?date WHERE {{
+  VALUES ?celex {{ {_valeurs_celex(candidats)} }}
+  ?work cdm:resource_legal_id_celex ?celex .
+  ?exp cdm:expression_belongs_to_work ?work ;
+       cdm:expression_uses_language <{_FRA}> ;
+       cdm:expression_title ?title .
+  OPTIONAL {{ ?work cdm:work_date_document ?date }}
+}}"""
+    trouves = {celex: _resultat(celex, titre, date) for celex, titre, date in _executer(q, timeout)}
+    if genre == "acte":
+        principal = trouves.get(candidats[0])
+        reponse["resultats"] = [principal] if principal else []
+        if not principal:
+            reponse["autres"] = [trouves[c] for c in candidats[1:] if c in trouves]
+    else:
+        reponse["resultats"] = [trouves[c] for c in candidats if c in trouves]
+    reponse["trouve"] = bool(reponse["resultats"])
+    if not reponse["trouve"]:
+        reponse["message"] = "Introuvable dans EUR-Lex" + (
+            " sous ce type ; un acte de même numéro existe sous un autre type." if reponse["autres"] else ".")
+    elif numero_attendu and not _titre_reprend(reponse["resultats"][0]["titre"], *numero_attendu):
+        reponse["message"] = "Le titre de l'acte trouvé ne reprend pas le numéro cité : à vérifier."
+    if etat:
+        _avec_etat(reponse["resultats"] + reponse["autres"], timeout)
+    return reponse
 
 
 if __name__ == "__main__":

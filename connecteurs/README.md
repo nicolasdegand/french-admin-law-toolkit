@@ -101,6 +101,7 @@ import eurlex
 eurlex.chercher("protection des données à caractère personnel", k=6)
 eurlex.chercher("aides d'État", k=6, secteurs=("3",))     # législation seulement
 eurlex.chercher_termes(["émissions industrielles"], k=6)  # tous les termes, dans le titre
+eurlex.resoudre("directive 2011/92/UE")                    # par le numéro : acte, affaire, CELEX
 ```
 
 Interroge le point d'accès SPARQL public Cellar, par mots-clés dans les titres
@@ -124,6 +125,13 @@ Les deux fonctions donnent aussi l'état de chaque acte, en une requête de plus
 `rectificatifs`. La version consolidée est le texte à lire ; seul le texte publié
 au Journal officiel fait foi. `etat=False` s'en dispense ;
 `eurlex.etat_des_actes([...])` interroge directement des numéros CELEX.
+
+`resoudre` part d'une référence telle qu'on l'écrit (« règlement (CE) n° 1013/2006 »,
+« directive 92/43/CEE », « C-461/17 », un numéro CELEX) : elle en déduit le numéro
+CELEX et vérifie dans Cellar que l'acte ou l'affaire existe, avec son état. Une
+référence qui se trompe de type est signalée (« directive 2016/679 » : c'est un
+règlement), comme un acte dont le titre ne reprend pas le numéro cité. C'est la
+fonction à utiliser pour vérifier une citation.
 
 ## Conseil constitutionnel : les QPC en instance
 
