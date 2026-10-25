@@ -23,9 +23,10 @@ def reponse_sparql(lignes):
     return mock.Mock(return_value=mock.Mock(read=lambda: json.dumps(corps).encode("utf-8")))
 
 
-def requete_envoyee(substitut):
-    """Texte de la requête SPARQL passée au substitut de `urlopen` lors de son dernier appel."""
-    url = substitut.call_args[0][0].full_url
+def requete_envoyee(substitut, n=0):
+    """Texte de la requête SPARQL passée au substitut de `urlopen` lors de son appel n° `n`
+    (0 : la recherche ; 1 : l'état des actes trouvés)."""
+    url = substitut.call_args_list[n][0][0].full_url
     return urllib.parse.parse_qs(urllib.parse.urlparse(url).query)["query"][0]
 
 
@@ -295,7 +296,8 @@ class TousLesTermes(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", reponse_sparql(lignes)):
             r = eurlex.chercher_termes(["taxe", "valeur ajoutée"], k=2)
         self.assertEqual([x["celex"] for x in r], ["32006L0112", "32022L0542"])
-        self.assertEqual(set(r[0]), {"reference", "celex", "type", "titre", "date", "lien", "rectificatifs"})
+        self.assertEqual(set(r[0]), {"reference", "celex", "type", "titre", "date", "lien", "rectificatifs",
+                                     "en_vigueur", "fin_de_validite", "version_consolidee"})
         self.assertEqual(r[0]["reference"], "Directive — CELEX 32006L0112")
 
     def test_pas_d_acte_phare(self):
@@ -306,6 +308,114 @@ class TousLesTermes(unittest.TestCase):
         with mock.patch("urllib.request.urlopen", side_effect=urllib.error.URLError("réseau coupé")):
             with self.assertRaises(urllib.error.URLError):
                 eurlex.chercher_termes(["taxe"])
+
+
+def reponses(recherche, etat):
+    """Substitut de `urlopen` : la requête d'état des actes reçoit `etat` (liste de dictionnaires
+    de liaisons SPARQL), toute autre requête les résultats de recherche `recherche`."""
+    def ouvrir(req, timeout=None):
+        if "act_consolidated" in urllib.parse.unquote_plus(req.full_url):
+            corps = {"results": {"bindings": [{k: {"value": v} for k, v in b.items()} for b in etat]}}
+        else:
+            corps = {"results": {"bindings": [
+                {"celex": {"value": c}, "title": {"value": t}, "date": {"value": d}} for c, t, d in recherche]}}
+        return mock.Mock(read=lambda: json.dumps(corps).encode("utf-8"))
+    return mock.Mock(side_effect=ouvrir)
+
+
+ETAT_2010_75 = [
+    {"bc": "32010L0075", "genre": "etat", "v": "1", "d": "9999-12-31"},
+    {"bc": "32010L0075", "genre": "consolidee", "c": "02010L0075-20110106"},
+    {"bc": "32010L0075", "genre": "consolidee", "c": "02010L0075-20240804"},
+    {"bc": "32010L0075", "genre": "consolidee", "c": "02001L0080-20160101"},   # acte abrogé par 2010/75
+    {"bc": "32010L0075", "genre": "rectificatif", "c": "32010L0075R(15)"},
+    {"bc": "32010L0075", "genre": "rectificatif", "c": "32010L0075R(01)"},
+    {"bc": "32001L0080", "genre": "etat", "v": "0", "d": "2015-12-31"},
+]
+
+
+class EtatDesActes(unittest.TestCase):
+    """etat_des_actes et le paramètre `etat` des deux recherches. Liaisons inspirées de Cellar
+    (25/10/2026)."""
+
+    def etats(self, celex, liaisons=ETAT_2010_75):
+        substitut = reponses([], liaisons)
+        with mock.patch("urllib.request.urlopen", substitut):
+            return eurlex.etat_des_actes(celex), substitut
+
+    def test_acte_en_vigueur(self):
+        e, _ = self.etats(["32010L0075"])
+        self.assertEqual(e["32010L0075"], {
+            "en_vigueur": True, "fin_de_validite": None,
+            "version_consolidee": {"celex": "02010L0075-20240804", "date": "2024-08-04",
+                                   "lien": "https://eur-lex.europa.eu/legal-content/FR/TXT/?uri=CELEX:02010L0075-20240804"},
+            "rectificatifs": ["32010L0075R(01)", "32010L0075R(15)"]})
+
+    def test_acte_abroge(self):
+        e, _ = self.etats(["32001L0080"])
+        self.assertEqual((e["32001L0080"]["en_vigueur"], e["32001L0080"]["fin_de_validite"]), (False, "2015-12-31"))
+
+    def test_consolidations_d_autres_actes_ignorees(self):
+        e, _ = self.etats(["32010L0075"])
+        self.assertTrue(e["32010L0075"]["version_consolidee"]["celex"].startswith("02010L0075-"))
+
+    def test_acte_sans_information(self):
+        e, _ = self.etats(["62019CJ0123"])
+        self.assertEqual(e["62019CJ0123"], {"en_vigueur": None, "fin_de_validite": None,
+                                            "version_consolidee": None, "rectificatifs": []})
+
+    def test_une_seule_requete(self):
+        _, substitut = self.etats(["32010L0075", "32001L0080", "32010L0075"])
+        self.assertEqual(substitut.call_count, 1)
+        self.assertIn('FILTER(STR(?bc) IN ("32010L0075", "32001L0080"))', requete_envoyee(substitut))
+
+    def test_numero_invalide_ecarte(self):
+        e, substitut = self.etats(['32010L0075") || ("x', ""])
+        self.assertEqual(e, {})
+        substitut.assert_not_called()
+
+    def test_chercher_termes_avec_etat(self):
+        lignes = [("32010L0075", "Directive relative aux émissions industrielles", "2010-11-24"),
+                  ("32010L0075R(03)", "Rectificatif à la directive relative aux émissions", "2012-06-19")]
+        substitut = reponses(lignes, ETAT_2010_75)
+        with mock.patch("urllib.request.urlopen", substitut):
+            r = eurlex.chercher_termes(["émissions industrielles"])
+        self.assertEqual(substitut.call_count, 2)
+        self.assertEqual(len(r), 1)
+        self.assertTrue(r[0]["en_vigueur"])
+        self.assertEqual(r[0]["version_consolidee"]["celex"], "02010L0075-20240804")
+        self.assertEqual(r[0]["rectificatifs"], ["32010L0075R(01)", "32010L0075R(03)", "32010L0075R(15)"])
+
+    def test_sans_etat_une_seule_requete(self):
+        lignes = [("32010L0075", "Directive relative aux émissions industrielles", "2010-11-24")]
+        substitut = reponses(lignes, ETAT_2010_75)
+        with mock.patch("urllib.request.urlopen", substitut):
+            r = eurlex.chercher_termes(["émissions industrielles"], etat=False)
+        self.assertEqual(substitut.call_count, 1)
+        self.assertNotIn("en_vigueur", r[0])
+
+    def test_chercher_actes_phares_avec_etat(self):
+        liaisons = [{"bc": "32016R0679", "genre": "etat", "v": "1", "d": "9999-12-31"}]
+        with mock.patch("urllib.request.urlopen", reponses([], liaisons)):
+            r = eurlex.chercher("durée de conservation des données au regard du RGPD")
+        self.assertEqual((r[0]["celex"], r[0]["en_vigueur"]), ("32016R0679", True))
+
+    def test_aucun_resultat_pas_de_requete_d_etat(self):
+        substitut = reponses([], ETAT_2010_75)
+        with mock.patch("urllib.request.urlopen", substitut):
+            self.assertEqual(eurlex.chercher_termes(["introuvable"]), [])
+        self.assertEqual(substitut.call_count, 1)
+
+    def test_panne_de_la_requete_d_etat(self):
+        lignes = [("32010L0075", "Directive relative aux émissions industrielles", "2010-11-24")]
+        normal = reponses(lignes, [])
+        def ouvrir(req, timeout=None):
+            if "act_consolidated" in urllib.parse.unquote_plus(req.full_url):
+                raise urllib.error.URLError("réseau coupé")
+            return normal(req, timeout)
+        with mock.patch("urllib.request.urlopen", side_effect=ouvrir):
+            with self.assertRaises(urllib.error.URLError):
+                eurlex.chercher_termes(["émissions industrielles"])
 
 
 class Structure(unittest.TestCase):
