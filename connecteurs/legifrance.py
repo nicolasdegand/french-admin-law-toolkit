@@ -334,10 +334,13 @@ _RE_SUBDIVISION = re.compile(r"""
   | \s*,?\s*[a-zA-Z]\s*\)\s*$
   """, re.IGNORECASE | re.VERBOSE)
 
-# Chiffre romain final, séparé du numéro par une espace : paragraphe (« L. 181-18 V ») ou partie du
-# numéro (article 150 V du code général des impôts, constaté le 02/11/2026). Rien dans l'écriture ne
-# permet de trancher : le numéro est d'abord cherché tel qu'il est écrit, puis sans ce chiffre.
-_RE_ROMAIN_FINAL = re.compile(r"^(.*\S)\s+([IVXL]+)$")
+# Fin ambiguë : dernier mot, séparé du numéro par une espace, fait uniquement des lettres I, V, X et
+# L. Ce peut être une lettre du numéro (article 150 V du code général des impôts, constaté le
+# 02/11/2026) ou un numéro de paragraphe (« L. 181-18 V », paragraphe V). Rien dans l'écriture ne
+# permet de trancher : le numéro est d'abord cherché tel qu'il est écrit, puis sans ce dernier mot.
+# Un dernier mot qui contient une autre lettre (« 150 VB », « 39 C », « L. 54 A ») ne peut pas être
+# un numéro de paragraphe : il n'est jamais retiré.
+_RE_FIN_AMBIGUE = re.compile(r"^(.*\S)\s+([IVXL]+)$")
 
 
 def _decouper(article):
@@ -394,11 +397,12 @@ def _formes(a, cascade=True):
 
 
 def _candidats_detail(article):
-    """Les numéros à essayer pour `article` (voir `_art_candidates`), chacun avec le chiffre romain
-    final qu'il laisse de côté (None s'il n'en laisse pas), et la subdivision sans ambiguïté
-    retirée de la désignation. Renvoie ([(numéro, romain)], subdivision)."""
+    """Les numéros à essayer pour `article` (voir `_art_candidates`), chacun avec la fin ambiguë
+    qu'il laisse de côté, lue alors comme un paragraphe (None s'il n'en laisse pas), et la
+    subdivision sans ambiguïté retirée de la désignation. Renvoie ([(numéro, paragraphe)],
+    subdivision)."""
     numero, subdivision = _decouper(article)
-    m = _RE_ROMAIN_FINAL.match(numero)
+    m = _RE_FIN_AMBIGUE.match(numero)
     if not m:
         return [(c, None) for c in _formes(numero)], subdivision
     detail = [(c, None) for c in _formes(numero, cascade=False)]
@@ -410,8 +414,8 @@ def _candidats_detail(article):
 def _art_candidates(article):
     """Du plus spécifique au plus général : retire le mot « article » ou « art. » en tête, les
     mentions de subdivision sans ambiguïté (« , I », « al. 2 », « 8° », « a) ») et, en cascade,
-    les subdivisions terminales séparées par un tiret (ex. CGI 158-5-a -> 158). Un chiffre romain
-    final sans virgule est d'abord gardé, puis retiré (« 150 V » est un article du CGI).
+    les subdivisions terminales séparées par un tiret (ex. CGI 158-5-a -> 158). Une fin ambiguë
+    (voir `_RE_FIN_AMBIGUE`) est d'abord gardée, puis retirée (« 150 V » est un article du CGI).
     « L. 314-11 8° » -> ['L314-11', 'L314'] ; « 158-5-a » -> ['158-5-a','158-5','158'] ;
     « Article L. 181-18 » -> ['L181-18', 'L181'] ; « article 6 » -> ['6'] ;
     « L. 181-18, I, al. 2 » -> ['L181-18', 'L181'] ;
@@ -419,18 +423,19 @@ def _art_candidates(article):
     return [c for c, _ in _candidats_detail(article)[0]]
 
 
-def _subdivision_rendue(subdivision, romain):
-    """Subdivision à signaler dans la réponse : celle retirée de la désignation, précédée du
-    chiffre romain laissé de côté, s'il y en a un. None s'il n'y a rien."""
-    parties = [p for p in (romain, subdivision) if p]
+def _subdivision_rendue(subdivision, paragraphe):
+    """Subdivision à signaler dans la réponse : celle retirée de la désignation, précédée de la
+    fin ambiguë laissée de côté et lue comme un paragraphe, s'il y en a une. None s'il n'y a
+    rien."""
+    parties = [p for p in (paragraphe, subdivision) if p]
     return ", ".join(parties) or None
 
 
 def _meme_article(demande, rendu):
     """Deux écritures d'un même numéro d'article (« L. 321-3 » et « L321-3 ») désignent-elles le
     même article ? Comparaison sur la forme canonique, sans « article » ou « art. » en tête,
-    sans espaces ni points, mentions de subdivision retirées. Un chiffre romain final peut être
-    un paragraphe : « L. 181-18 V » désigne aussi bien L. 181-18 que L. 181-18 V."""
+    sans espaces ni points, mentions de subdivision retirées. Une fin ambiguë peut être un
+    paragraphe : « L. 181-18 V » désigne aussi bien L. 181-18 que L. 181-18 V."""
     def canon(x):
         return re.sub(r"[\s.‑]", "", _sans_subdivision(str(x or ""))).strip().lower()
     voulu, rendu = canon(demande), canon(rendu)
@@ -438,7 +443,7 @@ def _meme_article(demande, rendu):
         return False
     if voulu == rendu:
         return True
-    m = _RE_ROMAIN_FINAL.match(_sans_subdivision(str(demande or "")))
+    m = _RE_FIN_AMBIGUE.match(_sans_subdivision(str(demande or "")))
     return bool(m) and canon(m.group(1)) == rendu
 
 
@@ -510,8 +515,8 @@ def resoudre_loi(nom, article, date, exact=False):
         _TOC_CACHE[ck] = r
     detail, subdivision = _candidats_detail(article)
     voulus = {}
-    for c, romain in detail:
-        voulus.setdefault(_fold(c), romain)
+    for c, paragraphe in detail:
+        voulus.setdefault(_fold(c), paragraphe)
     for a in _articles_de_loda(r, []):
         if _fold(str(a.get("num") or "")) in voulus:
             subdiv = _subdivision_rendue(subdivision, voulus[_fold(str(a.get("num") or ""))])
@@ -566,7 +571,7 @@ def resoudre(code, article, date, exact=False):
         return resoudre_loi(code, article, date, exact=exact)
     code = _canon_code(code)
     detail, subdivision = _candidats_detail(article)
-    for num, romain in detail:
+    for num, paragraphe in detail:
         payload = {"recherche": {
             "champs": [{"typeChamp": "NUM_ARTICLE",
                         "criteres": [{"typeRecherche": "EXACTE", "valeur": num, "operateur": "ET"}],
@@ -600,7 +605,7 @@ def resoudre(code, article, date, exact=False):
             "version_fin": _iso_fin(art.get("dateFin")),
             "lien": f"https://www.legifrance.gouv.fr/codes/article_lc/{art.get('id') or ids[0]}",
         }
-        subdiv = _subdivision_rendue(subdivision, romain)
+        subdiv = _subdivision_rendue(subdivision, paragraphe)
         if subdiv:
             r["subdivision"] = subdiv
         return _ecarter_inexact(r) if exact else r

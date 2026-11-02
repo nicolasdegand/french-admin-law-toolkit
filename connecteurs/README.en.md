@@ -67,9 +67,10 @@ too.
 
 `resoudre` takes a single article. Mentions of a paragraph or sub-paragraph
 (« L. 181-18, I », « al. 2 ») are removed from the number searched and returned
-in `subdivision`. A final Roman numeral without a comma (« L. 181-18 V ») is first
-searched as part of the number, since article 150 V of the general tax code
-exists, then as a paragraph. A designation of several articles
+in `subdivision`. A last word made only of I, V, X or L is ambiguous: in « 150 V »
+(general tax code), V is a letter of the number; in « L. 181-18 V », it is
+paragraph V. The number is therefore first searched as written, then without
+that last word, then read as a paragraph. A designation of several articles
 (« articles L. 181-18 et L. 181-19 », « L. 181-18 à L. 181-20 ») goes through
 `resoudre_plusieurs`, which expands ranges with the plan of the code or Act on
 the date: only the articles then in force are included. « et suivants » (and

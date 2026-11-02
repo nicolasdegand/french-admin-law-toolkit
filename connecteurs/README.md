@@ -65,9 +65,10 @@ indisponible. Le module distingue les deux : votre code doit le faire aussi.
 
 `resoudre` ne prend qu'un article. Les mentions de paragraphe et d'alinéa
 (« L. 181-18, I », « al. 2 ») sont retirées du numéro cherché et rendues dans
-`subdivision`. Un chiffre romain final sans virgule (« L. 181-18 V ») est d'abord
-cherché comme partie du numéro, puisque l'article 150 V du code général des
-impôts existe, puis comme paragraphe. Une désignation de plusieurs
+`subdivision`. Un dernier mot fait uniquement de I, V, X ou L est ambigu : dans
+« 150 V » (code général des impôts), V est une lettre du numéro ; dans
+« L. 181-18 V », c'est le paragraphe V. Le numéro est donc d'abord cherché tel
+qu'il est écrit, puis sans ce dernier mot, lu alors comme un paragraphe. Une désignation de plusieurs
 articles (« articles L. 181-18 et L. 181-19 », « L. 181-18 à L. 181-20 ») passe
 par `resoudre_plusieurs`, qui développe les plages avec le plan du code ou de la
 loi à la date : seuls les articles alors en vigueur en font partie. « et

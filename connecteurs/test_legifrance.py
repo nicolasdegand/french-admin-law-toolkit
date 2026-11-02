@@ -329,8 +329,8 @@ class TermesDeRecherche(unittest.TestCase):
 
 
 class Subdivisions(unittest.TestCase):
-    """Mentions de subdivision retirées du numéro et rendues dans `subdivision` ; chiffre romain
-    final essayé d'abord comme partie du numéro (CGI 150 V), puis comme paragraphe."""
+    """Mentions de subdivision retirées du numéro et rendues dans `subdivision` ; fin ambiguë
+    (« V ») essayée d'abord comme lettre du numéro (CGI 150 V), puis comme paragraphe."""
 
     def test_retirees(self):
         cas = {"article L. 181-18, I": "I", "L. 181-18 (II)": "II", "L. 181-18 al. 2": "al. 2",
@@ -347,8 +347,8 @@ class Subdivisions(unittest.TestCase):
         self.assertEqual(legifrance._art_candidates("150 VB"), ["150 VB", "150VB"])
         self.assertEqual(legifrance._art_candidates("1649 quater A")[0], "1649 quater A")
 
-    def test_romain_final(self):
-        # Le numéro tel qu'il est écrit d'abord, puis sans le chiffre romain, avant toute cascade.
+    def test_fin_ambigue(self):
+        # Le numéro tel qu'il est écrit d'abord, puis sans la fin ambiguë, avant toute cascade.
         self.assertEqual(legifrance._art_candidates("150 V"), ["150 V", "150V", "150"])
         self.assertEqual(legifrance._art_candidates("L. 181-18 V"),
                          ["L181-18 V", "L181-18V", "L181-18", "L181"])
@@ -377,12 +377,12 @@ class Subdivisions(unittest.TestCase):
         self.assertEqual(r["subdivision"], "I, al. 2")
         self.assertNotIn("subdivision", self.resoudre("L. 181-18", ["L181-18"]))
 
-    def test_romain_partie_du_numero(self):
+    def test_fin_ambigue_lettre_du_numero(self):
         r = self.resoudre("150 V", ["150 V"])
         self.assertEqual((r["trouve"], r["num"]), (True, "150 V"))
         self.assertNotIn("subdivision", r)
 
-    def test_romain_paragraphe(self):
+    def test_fin_ambigue_paragraphe(self):
         r = self.resoudre("L. 181-18 V, al. 2", ["L181-18"])
         self.assertEqual((r["trouve"], r["exact"], r["num"]), (True, True, "L181-18"))
         self.assertEqual(r["subdivision"], "V, al. 2")
