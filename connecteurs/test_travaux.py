@@ -459,6 +459,90 @@ class ArticleCodifie(unittest.TestCase):
         self.assertIn("503", r["panne"])
 
 
+class DossierDuTexte(unittest.TestCase):
+    """Le dossier législatif propre au texte, et non le premier rattaché ; toutes les pièces.
+    Forme des réponses constatée le 02/11/2026 ; identifiants et intitulés fictifs."""
+
+    LOI = "LOI n° 2016-9999 du 8 août 2016 pour l'exemple (1)"
+    DOSSIERS = [{"id": "JORFDOLE000000000071", "titre": "Ordonnance n° 2012-9999 du 5 janvier 2012 fictive"},
+                {"id": "JORFDOLE000000000072", "titre": "LOI n° 2016-9999 du 8 août 2016 pour l'exemple"},
+                {"id": "JORFDOLE000000000073", "titre": "Ordonnance n° 2015-9999 du 23 septembre 2015 fictive"}]
+
+    def test_par_numero(self):
+        propre, autres = travaux._dossier_du_texte(self.DOSSIERS, self.LOI)
+        self.assertEqual(propre["id"], "JORFDOLE000000000072")
+        self.assertEqual([d["id"] for d in autres], ["JORFDOLE000000000071", "JORFDOLE000000000073"])
+
+    def test_par_intitule_sans_numero(self):
+        dossiers = [{"id": "JORFDOLE000000000074", "titre": "Autre texte"},
+                    {"id": "JORFDOLE000000000075", "titre": "Loi relative à  l'Exemple"}]
+        propre, autres = travaux._dossier_du_texte(dossiers, "LOI relative à l'exemple (1)")
+        self.assertEqual(propre["id"], "JORFDOLE000000000075")
+        self.assertEqual(len(autres), 1)
+
+    def test_dossier_seul(self):
+        seul = [{"id": "JORFDOLE000000000076", "titre": "Intitulé sans rapport"}]
+        self.assertEqual(travaux._dossier_du_texte(seul, self.LOI), (seul[0], []))
+
+    def test_plusieurs_sans_le_sien(self):
+        propre, autres = travaux._dossier_du_texte([self.DOSSIERS[0], self.DOSSIERS[2]], self.LOI)
+        self.assertIsNone(propre)
+        self.assertEqual(len(autres), 2)
+
+    def test_aucun_dossier(self):
+        self.assertEqual(travaux._dossier_du_texte(None, self.LOI), (None, []))
+
+    def pieces(self, n, max_pieces=None):
+        liens = [{"libelle": "Pièce %d" % i, "lien": "https://exemple.invalid/%d" % i} for i in range(n)]
+        reponse = {"dossierLegislatif": {"arborescence": {"niveaux": [{"libelle": "Sénat", "liens": liens}]}}}
+        with mock.patch.object(travaux.legifrance, "_post", lambda chemin, charge: reponse):
+            return travaux.dossier_pieces("JORFDOLE000000000072", max_pieces=max_pieces)
+
+    def test_toutes_les_pieces(self):
+        r = self.pieces(52)
+        self.assertEqual(len(r["pieces"]), 52)
+        self.assertNotIn("pieces_tronquees", r)
+
+    def test_coupe_signalee(self):
+        r = self.pieces(52, max_pieces=40)
+        self.assertEqual(len(r["pieces"]), 40)
+        self.assertTrue(r["pieces_tronquees"])
+        self.assertEqual(r["nombre_pieces"], 52)
+        self.assertNotIn("pieces_tronquees", self.pieces(30, max_pieces=40))
+
+    def travaux(self, dossiers):
+        def faux_post(chemin, charge):
+            if chemin == "/consult/getArticle":
+                return {"article": {"lienModifications": [
+                    {"linkType": "MODIFIE", "linkOrientation": "cible", "textCid": "JORFTEXT000000000070",
+                     "datePubliTexte": "2016-08-09", "textTitle": self.LOI, "natureText": "LOI"}]}}
+            if chemin == "/consult/jorf":
+                return {"nature": "LOI", "title": self.LOI, "prepWork": "", "dossiersLegislatifs": dossiers}
+            if chemin == "/consult/dossierLegislatif":
+                return {"dossierLegislatif": {"arborescence": {"niveaux": [{"libelle": "Sénat", "liens": [
+                    {"libelle": "Rapport " + charge["id"][-2:], "lien": "https://exemple.invalid/" + charge["id"]}]}]}}}
+            raise AssertionError("appel inattendu : " + chemin)
+        with mock.patch.object(travaux.legifrance, "resoudre", return_value=Pannes.TROUVE), \
+             mock.patch.object(travaux.legifrance, "_post", faux_post):
+            return travaux.travaux_pour_article("Code de l'environnement", "L. 123-2", "2016-09-01")
+
+    def test_reponse_dossier_propre(self):
+        r = self.travaux(self.DOSSIERS)
+        self.assertEqual(r["lien_dossier"], travaux._lien_dossier("JORFDOLE000000000072"))
+        self.assertEqual([p["libelle"] for p in r["pieces"]], ["Rapport 72"])
+        self.assertEqual([d["lien"] for d in r["autres_dossiers"]],
+                         [travaux._lien_dossier("JORFDOLE000000000071"),
+                          travaux._lien_dossier("JORFDOLE000000000073")])
+        self.assertNotIn("avertissement", r)
+
+    def test_reponse_sans_dossier_propre(self):
+        r = self.travaux([self.DOSSIERS[0], self.DOSSIERS[2]])
+        self.assertIsNone(r["lien_dossier"])
+        self.assertEqual(r["pieces"], [])
+        self.assertEqual(len(r["autres_dossiers"]), 2)
+        self.assertEqual(r["avertissement"], travaux._AVERTISSEMENT_DOSSIERS)
+
+
 class Demonstration(unittest.TestCase):
     """Le lancement direct (`python travaux.py`) exécute la démonstration jusqu'au bout."""
 
