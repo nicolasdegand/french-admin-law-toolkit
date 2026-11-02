@@ -115,7 +115,10 @@ names the codifying text and the original provision.
 explanatory memorandum, the note on preparatory works published in the Journal
 officiel and the list of documents in the legislative file (bill, reports,
 debates, adopted texts), each with its link. The text of reports and debates is
-not retrieved: to quote it, the document must be opened. When the creating text
+not retrieved: to quote it, the document must be opened. All documents are
+returned. An act that ratifies ordinances is also attached to their files: the
+module keeps the act's own legislative file and lists the others in
+`autres_dossiers`. When the creating text
 is an ordinance (*ordonnance*), or appears to be a codification, the response
 carries an `avertissement` (warning) indicating where to look for the
 legislature's intent.

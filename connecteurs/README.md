@@ -112,7 +112,10 @@ codification et la disposition d'origine.
 motifs, la note de travaux préparatoires publiée au Journal officiel et la liste
 des pièces du dossier législatif (projet, rapports, débats, textes adoptés),
 chacune avec son lien. Le texte des rapports et des débats n'est pas récupéré :
-pour le citer, il faut ouvrir la pièce. Lorsque le texte créateur est une
+pour le citer, il faut ouvrir la pièce. Toutes les pièces sont renvoyées.
+Une loi qui ratifie des ordonnances est aussi rattachée à leurs dossiers : le
+module retient le dossier de la loi elle-même, et liste les autres dans
+`autres_dossiers`. Lorsque le texte créateur est une
 ordonnance, ou semble être une codification, la réponse porte un
 `avertissement` qui indique où chercher l'intention du législateur.
 

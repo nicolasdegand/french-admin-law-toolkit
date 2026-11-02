@@ -78,6 +78,9 @@ _AVERTISSEMENT_ORIGINE = (
     "Version insérée dans le code par codification : les textes renvoyés sont ceux de la "
     "disposition codifiée (voir `codification`). Leurs travaux éclairent l'intention du "
     "législateur si la codification s'est faite à droit constant.")
+_AVERTISSEMENT_DOSSIERS = (
+    "Plusieurs dossiers législatifs sont rattachés à ce texte et aucun ne porte son intitulé : "
+    "ils sont listés dans `autres_dossiers`, sans leurs pièces, à ouvrir un à un.")
 _AVERTISSEMENT_PLUSIEURS = (
     "Plusieurs textes ont modifié cette version, et Légifrance ne dit pas lequel a produit la "
     "rédaction en cause : ils sont tous dans `textes`, chacun avec ses travaux, à vérifier un à un.")
@@ -205,10 +208,10 @@ def _travaux_du_texte(lien):
         titre = js.get("title") or titre
         prep = _clean(js.get("prepWork"))
         dl = js.get("dossiersLegislatifs") or []
-        if dl:
-            doss_id = dl[0].get("id")
     except Exception as e:
-        panne = legifrance._panne(e)
+        panne, dl = legifrance._panne(e), []
+    propre, autres = _dossier_du_texte(dl, titre)
+    doss_id = (propre or {}).get("id")
     dp = dossier_pieces(doss_id) if doss_id else {"pieces": [], "expose_motif": None}
     texte = {"loi": {"titre": titre, "nature": nature, "cid": cid,
                      "date_publi": lien.get("datePubliTexte")},
@@ -217,10 +220,52 @@ def _travaux_du_texte(lien):
              "travaux_preparatoires": prep,
              "pieces": dp.get("pieces", []),
              "expose_motif": dp.get("expose_motif")}
+    if dp.get("pieces_tronquees"):
+        texte.update(pieces_tronquees=True, nombre_pieces=dp["nombre_pieces"])
+    if autres:
+        texte["autres_dossiers"] = [{"titre": re.sub(r"\s+", " ", d.get("titre") or "").strip(),
+                                     "lien": _lien_dossier(d.get("id"))} for d in autres]
     avertissements = _avertissements(nature, titre)
+    if autres and not propre:
+        avertissements.append(_AVERTISSEMENT_DOSSIERS)
     if avertissements:
         texte["avertissement"] = " ".join(avertissements)
     return texte, panne or dp.get("panne")
+
+
+_RE_NUMERO_TEXTE = re.compile(r"n[°º]\s*(\d{2,4}-\d+)")
+
+
+def _dossier_du_texte(dossiers, titre):
+    """Le dossier législatif propre au texte, parmi ceux que Légifrance lui rattache, et les autres.
+    Renvoie (propre, autres) ; `propre` vaut None si aucun dossier n'est le sien.
+
+    Une loi qui ratifie des ordonnances est aussi rattachée à leurs dossiers, et l'ordre de la
+    liste ne met pas le sien en premier : pour la loi n° 2016-1087, le premier dossier est celui
+    de l'ordonnance n° 2012-9 (constaté le 02/11/2026 ; de même pour les lois n° 2018-148 et
+    n° 2024-322). Le dossier propre est celui dont l'intitulé porte le numéro du texte ; à
+    défaut de numéro, celui dont l'intitulé est celui du texte. Si aucun ne correspond, un
+    dossier seul est retenu ; plusieurs ne sont pas départagés."""
+    dossiers = [d for d in (dossiers or []) if d.get("id")]
+    m = _RE_NUMERO_TEXTE.search(titre or "")
+    if m:
+        siens = [d for d in dossiers
+                 if (_RE_NUMERO_TEXTE.search(d.get("titre") or "") or [None, None])[1] == m.group(1)]
+    else:
+        voulu = _intitule(titre)
+        siens = [d for d in dossiers if voulu and _intitule(d.get("titre")) == voulu]
+    if siens:
+        return siens[0], [d for d in dossiers if d is not siens[0]]
+    if len(dossiers) == 1:
+        return dossiers[0], []
+    return None, dossiers
+
+
+def _intitule(titre):
+    """Intitulé comparable : sans renvoi de note final (« (1) »), espaces réduits, casse et
+    accents repliés."""
+    t = re.sub(r"\s*\(\d+\)\s*$", "", titre or "")
+    return legifrance._fold(re.sub(r"\s+", " ", t)).strip()
 
 
 def travaux_pour_textes(textes, date):
@@ -251,9 +296,13 @@ def _pieces_from_arbo(arbo):
         walk(n, [])
     return out
 
-def dossier_pieces(dole_id, max_pieces=40):
+def dossier_pieces(dole_id, max_pieces=None):
     """Consulte un dossier législatif (JORFDOLE) et renvoie ses pièces avec liens
     (projet de loi, rapports, débats, exposé des motifs...) + l'exposé des motifs.
+    Toutes les pièces sont renvoyées, sauf si `max_pieces` est donné : la réponse porte alors
+    `pieces_tronquees` True et `nombre_pieces`, le nombre total, quand la liste a été coupée.
+    Les débats viennent en fin de liste : une coupe à 40, longtemps la règle, les retirait du
+    dossier de la loi n° 2016-1087, qui compte 52 pièces (constaté le 02/11/2026).
     Si PISTE n'a pas répondu, la réponse porte `panne` (le message de l'incident)."""
     if not legifrance or not dole_id:
         return {"pieces": [], "expose_motif": None}
@@ -274,7 +323,10 @@ def dossier_pieces(dole_id, max_pieces=40):
         if p["lien"] in seen:
             continue
         seen.add(p["lien"]); uniq.append(p)
-    return {"pieces": uniq[:max_pieces], "expose_motif": _clean(d.get("exposeMotif"))}
+    reponse = {"pieces": uniq, "expose_motif": _clean(d.get("exposeMotif"))}
+    if max_pieces is not None and len(uniq) > max_pieces:
+        reponse.update(pieces=uniq[:max_pieces], pieces_tronquees=True, nombre_pieces=len(uniq))
+    return reponse
 
 
 # Démonstration, exécutée seulement au lancement direct (`python travaux.py`).
