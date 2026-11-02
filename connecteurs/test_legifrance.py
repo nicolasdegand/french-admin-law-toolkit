@@ -5,6 +5,7 @@ Lancement, depuis la racine du dépôt :
     python -m unittest discover -s connecteurs -v
 """
 import ast
+import re
 import unittest
 from unittest import mock
 
@@ -325,6 +326,139 @@ class TermesDeRecherche(unittest.TestCase):
         for termes in ("", "   ", [], None):
             with self.subTest(termes=termes):
                 self.assertIsNone(self.valeur_envoyee(termes))
+
+
+class Subdivisions(unittest.TestCase):
+    """Mentions de paragraphe et d'alinéa retirées du numéro ; lettres finales gardées."""
+
+    def test_retirees(self):
+        for article in ("article L. 181-18, I", "L. 181-18 (II)", "L. 181-18 al. 2", "L. 181-18, alinéa 3",
+                        "L. 181-18, premier alinéa", "L. 181-18, I, al. 2", "les articles L. 181-18"):
+            with self.subTest(article=article):
+                self.assertEqual(legifrance._art_candidates(article)[0], "L181-18")
+                self.assertTrue(legifrance._meme_article(article, "L181-18"))
+
+    def test_gardees(self):
+        self.assertEqual(legifrance._art_candidates("L. 54 A")[0], "L54 A")
+        self.assertEqual(legifrance._art_candidates("1649 X")[0], "1649 X")
+
+
+class Designations(unittest.TestCase):
+    """_designations : lecture d'une désignation d'un ou plusieurs articles."""
+
+    def test_listes_et_plages(self):
+        cas = {
+            "articles L. 181-18 et L. 181-19": [("article", "L. 181-18"), ("article", "L. 181-19")],
+            "L. 181-18, L. 181-19 et L. 181-21": [("article", "L. 181-18"), ("article", "L. 181-19"),
+                                                  ("article", "L. 181-21")],
+            "L. 181-18 à L. 181-20": [("plage", "L. 181-18", "L. 181-20")],
+            "L. 181-18 et 181-19": [("article", "L. 181-18"), ("article", "L. 181-19")],
+            "R. 181-28 à 181-30": [("plage", "R. 181-28", "R. 181-30")],
+            "L. 181-18, I et L. 181-19, al. 2": [("article", "L. 181-18"), ("article", "L. 181-19")],
+            "L. 181-18, 3° et L. 181-19": [("article", "L. 181-18"), ("article", "L. 181-19")],
+            "articles 1240 et 1241": [("article", "1240"), ("article", "1241")],
+            "articles 6, 7 et 8": [("article", "6"), ("article", "7"), ("article", "8")],
+            "L. 314-11 8°": [("article", "L. 314-11 8°")],
+        }
+        for texte, attendu in cas.items():
+            with self.subTest(texte=texte):
+                self.assertEqual(legifrance._designations(texte), (attendu, None))
+
+    def test_et_suivants_refuse(self):
+        for texte in ("L. 181-18 et suivants", "L. 181-18 et s.", "L. 181-18 et suiv.", "L. 181-18 ss."):
+            with self.subTest(texte=texte):
+                elements, refus = legifrance._designations(texte)
+                self.assertEqual(elements, [])
+                self.assertIn("et suivants", refus)
+
+    def test_plusieurs(self):
+        self.assertTrue(legifrance._plusieurs("L. 181-18 et L. 181-19"))
+        self.assertTrue(legifrance._plusieurs("L. 181-18 à L. 181-20"))
+        self.assertTrue(legifrance._plusieurs("L. 181-18 et suivants"))
+        for seul in ("L. 181-18", "article L. 181-18, I", "L. 54 A", "L. 314-11 8°"):
+            with self.subTest(seul=seul):
+                self.assertFalse(legifrance._plusieurs(seul))
+
+    def test_resoudre_refuse_sans_appel(self):
+        def interdit(chemin, charge):
+            raise AssertionError("appel inattendu : " + chemin)
+        with mock.patch.object(legifrance, "_post", interdit):
+            for code in ("Code de l'environnement", "loi n° 78-17"):
+                with self.subTest(code=code):
+                    r = legifrance.resoudre(code, "articles L. 181-18 et L. 181-19", "2024-01-01")
+                    self.assertFalse(r["trouve"])
+                    self.assertTrue(r["plusieurs"])
+                    self.assertIn("resoudre_plusieurs", r["message"])
+
+
+class NumerosDuPlan(unittest.TestCase):
+    """_numeros_du_plan : ordre du texte d'après `intOrdre`, articles abrogés et doublons écartés.
+    Forme du plan de la loi n° 78-17 constatée le 02/11/2026 ; rangs fictifs."""
+
+    def test_ordre_doublons_abroges(self):
+        plan = {"sections": [
+            {"title": "Titre II", "intOrdre": 20, "articles": [{"num": "8", "intOrdre": 1, "etat": "VIGUEUR"}]},
+            {"title": "Titre Ier", "intOrdre": 10, "articles": [
+                {"num": "5", "intOrdre": 5, "etat": "VIGUEUR"},
+                {"num": "7", "intOrdre": 7, "etat": "VIGUEUR"},
+                {"num": "5-1", "intOrdre": 6, "etat": "ABROGE"},
+                {"num": "6", "intOrdre": 6, "etat": "VIGUEUR"},
+                {"num": "7", "intOrdre": 8, "etat": "VIGUEUR"}]}]}
+        self.assertEqual(legifrance._numeros_du_plan(plan, []), ["5", "6", "7", "8"])
+
+    def test_sans_rang(self):
+        plan = {"articles": [{"num": "1"}], "sections": [{"articles": [{"num": "2"}]}]}
+        self.assertEqual(legifrance._numeros_du_plan(plan, []), ["1", "2"])
+
+
+class ResoudrePlusieurs(unittest.TestCase):
+    """resoudre_plusieurs : listes, plages développées avec le plan, refus. PISTE simulé ;
+    identifiants fictifs."""
+
+    PLAN = {"sections": [{"intOrdre": 1, "articles": [
+        {"num": n, "intOrdre": i, "etat": "VIGUEUR"} for i, n in enumerate(
+            ["L181-17", "L181-18", "L181-19", "L181-20", "L181-21"])]}]}
+
+    def appeler(self, designation):
+        def resoudre(code, num, date, exact=False):
+            return {"trouve": True, "exact": True, "num": re.sub(r"[\s.]", "", num)}
+        with mock.patch.object(legifrance, "_legitext_code", return_value="LEGITEXT000000000090"), \
+             mock.patch.object(legifrance, "_post", lambda chemin, charge: self.PLAN), \
+             mock.patch.dict(legifrance._TOC_CACHE, clear=True), \
+             mock.patch.object(legifrance, "resoudre", resoudre):
+            return legifrance.resoudre_plusieurs("Code de l'environnement", designation, "2024-01-01")
+
+    def nums(self, r):
+        return [a["num"] for a in r["articles"]]
+
+    def test_liste(self):
+        r = self.appeler("articles L. 181-18 et L. 181-21")
+        self.assertTrue(r["trouve"])
+        self.assertEqual(self.nums(r), ["L181-18", "L181-21"])
+
+    def test_plage(self):
+        self.assertEqual(self.nums(self.appeler("L. 181-18 à L. 181-20")), ["L181-18", "L181-19", "L181-20"])
+
+    def test_plage_et_article(self):
+        self.assertEqual(self.nums(self.appeler("L. 181-17 et L. 181-19 à 181-21")),
+                         ["L181-17", "L181-19", "L181-20", "L181-21"])
+
+    def test_plage_hors_vigueur(self):
+        r = self.appeler("L. 181-18 à L. 181-25")
+        self.assertFalse(r["trouve"])
+        self.assertIn("L. 181-25 n'est pas en vigueur", r["message"])
+
+    def test_plage_a_l_envers(self):
+        self.assertIn("suit le dernier", self.appeler("L. 181-20 à L. 181-18")["message"])
+
+    def test_et_suivants(self):
+        r = self.appeler("L. 181-18 et suivants")
+        self.assertEqual(r["articles"], [])
+        self.assertIn("et suivants", r["message"])
+
+    def test_plage_trop_longue(self):
+        with mock.patch.object(legifrance, "_PLAGE_MAX", 2):
+            self.assertIn("plus de 2 articles", self.appeler("L. 181-18 à L. 181-20")["message"])
 
 
 class Structure(unittest.TestCase):
