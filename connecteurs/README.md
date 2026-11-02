@@ -38,6 +38,7 @@ import legifrance
 
 legifrance.resoudre("code de la consommation", "L. 511-7", "2024-03-15")
 legifrance.resoudre_loi("loi n° 78-17", "6", "2024-03-15")
+legifrance.resoudre_plusieurs("code de l'environnement", "L. 181-18 à L. 181-20", "2024-03-15")
 legifrance.historique_article("code général des collectivités territoriales", "L. 2121-29")
 legifrance.chercher_termes("obligation de motivation refus protection fonctionnelle", k=5)
 legifrance.etat_connecteur()          # diagnostic : identifiants, jeton, abonnement
@@ -61,6 +62,13 @@ loi, d'ordonnance ou de décret, mais la distinction reste à connaître.
 en cas d'incident réseau ou d'API, `panne`. Traiter une panne comme une absence
 conduit à conclure qu'un article n'existe pas alors que le service était
 indisponible. Le module distingue les deux : votre code doit le faire aussi.
+
+`resoudre` ne prend qu'un article ; les mentions de paragraphe et d'alinéa
+(« L. 181-18, I », « al. 2 ») y sont ignorées. Une désignation de plusieurs
+articles (« articles L. 181-18 et L. 181-19 », « L. 181-18 à L. 181-20 ») passe
+par `resoudre_plusieurs`, qui développe les plages avec le plan du code ou de la
+loi à la date : seuls les articles alors en vigueur en font partie. « et
+suivants » est refusé, la liste n'étant pas fermée.
 
 Un cache disque est **facultatif** : si un module `cache_disque` exposant
 `cle(nom, args, kwargs, date)`, `lire(cle)` et `ecrire(cle, valeur)` est

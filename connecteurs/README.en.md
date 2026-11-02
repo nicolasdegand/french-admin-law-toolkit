@@ -38,6 +38,7 @@ import legifrance
 
 legifrance.resoudre("code de la consommation", "L. 511-7", "2024-03-15")
 legifrance.resoudre_loi("loi n° 78-17", "6", "2024-03-15")
+legifrance.resoudre_plusieurs("code de l'environnement", "L. 181-18 à L. 181-20", "2024-03-15")
 legifrance.historique_article("code général des collectivités territoriales", "L. 2121-29")
 legifrance.chercher_termes("obligation de motivation refus protection fonctionnelle", k=5)
 legifrance.etat_connecteur()          # diagnostic : identifiants, jeton, abonnement
@@ -63,6 +64,13 @@ in the event of a network or API incident, `panne` (outage). Treating an outage
 as an absence leads to concluding that an article does not exist when the
 service was unavailable. The module distinguishes the two: your code must do so
 too.
+
+`resoudre` takes a single article; mentions of a paragraph or sub-paragraph
+(« L. 181-18, I », « al. 2 ») are ignored. A designation of several articles
+(« articles L. 181-18 et L. 181-19 », « L. 181-18 à L. 181-20 ») goes through
+`resoudre_plusieurs`, which expands ranges with the plan of the code or Act on
+the date: only the articles then in force are included. « et suivants » (and
+following) is refused, the list not being closed.
 
 A disk cache is **optional**: if a module `cache_disque` exposing
 `cle(nom, args, kwargs, date)`, `lire(cle)` and `ecrire(cle, valeur)` can be
