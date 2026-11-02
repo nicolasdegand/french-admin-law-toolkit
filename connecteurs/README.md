@@ -63,8 +63,11 @@ en cas d'incident réseau ou d'API, `panne`. Traiter une panne comme une absence
 conduit à conclure qu'un article n'existe pas alors que le service était
 indisponible. Le module distingue les deux : votre code doit le faire aussi.
 
-`resoudre` ne prend qu'un article ; les mentions de paragraphe et d'alinéa
-(« L. 181-18, I », « al. 2 ») y sont ignorées. Une désignation de plusieurs
+`resoudre` ne prend qu'un article. Les mentions de paragraphe et d'alinéa
+(« L. 181-18, I », « al. 2 ») sont retirées du numéro cherché et rendues dans
+`subdivision`. Un chiffre romain final sans virgule (« L. 181-18 V ») est d'abord
+cherché comme partie du numéro, puisque l'article 150 V du code général des
+impôts existe, puis comme paragraphe. Une désignation de plusieurs
 articles (« articles L. 181-18 et L. 181-19 », « L. 181-18 à L. 181-20 ») passe
 par `resoudre_plusieurs`, qui développe les plages avec le plan du code ou de la
 loi à la date : seuls les articles alors en vigueur en font partie. « et

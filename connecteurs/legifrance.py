@@ -322,40 +322,54 @@ def _canon_code(code):
 # « article », « Article », « articles », « art. », « Art. », « l'article » en tête d'une désignation
 _RE_PREFIXE_ARTICLE = re.compile(r"^\s*(?:l['’]\s*|les\s+)?art(?:icle)?s?\.?\s*", re.IGNORECASE)
 
-# Mention d'une subdivision de l'article, en fin de désignation : paragraphe en chiffres romains
-# après une virgule ou entre parenthèses (« L. 181-18, I », « L. 181-18 (II) ») ; alinéa
-# (« al. 2 », « alinéa 3 », « premier alinéa »). Les chiffres romains sans virgule ni parenthèse
-# restent : certains numéros d'article finissent par une lettre.
+# Mention d'une subdivision de l'article, en fin de désignation, sans ambiguïté : paragraphe en
+# chiffres romains après une virgule ou entre parenthèses (« L. 181-18, I », « L. 181-18 (II) ») ;
+# alinéa (« al. 2 », « alinéa 3 », « premier alinéa ») ; « 8° » ; « a) ».
 _RE_SUBDIVISION = re.compile(r"""
-    \s*(?:,\s*\(?|\()[IVX]+\)?\s*$
+    \s*,\s*\(?[IVX]+\)?\s*$
+  | \s*\([IVX]+\)\s*$
   | \s*,?\s*(?:al\.|alin[ée]a)\s*\d+.*$
   | \s*,?\s*(?:premier|deuxième|troisième|quatrième|dernier|avant-dernier)\s+alin[ée]a.*$
+  | \s*,?\s*\d+\s*°.*$
+  | \s*,?\s*[a-zA-Z]\s*\)\s*$
   """, re.IGNORECASE | re.VERBOSE)
+
+# Chiffre romain final, séparé du numéro par une espace : paragraphe (« L. 181-18 V ») ou partie du
+# numéro (article 150 V du code général des impôts, constaté le 02/11/2026). Rien dans l'écriture ne
+# permet de trancher : le numéro est d'abord cherché tel qu'il est écrit, puis sans ce chiffre.
+_RE_ROMAIN_FINAL = re.compile(r"^(.*\S)\s+([IVXL]+)$")
+
+
+def _decouper(article):
+    """Sépare une désignation d'article de ses mentions de subdivision sans ambiguïté (voir
+    `_RE_SUBDIVISION`), même enchaînées. Renvoie (numéro, subdivision) : « L. 181-18, I, al. 2 »
+    -> (« L. 181-18 », « I, al. 2 ») ; subdivision None s'il n'y en a pas. « article », « art. »
+    et « les articles » en tête sont retirés."""
+    a = _RE_PREFIXE_ARTICLE.sub("", article or "")
+    parties = []
+    while True:
+        m = _RE_SUBDIVISION.search(a)
+        if not m or m.start() == 0:
+            break
+        partie = m.group(0).strip(" ,")
+        romain = re.fullmatch(r"\(([IVX]+)\)", partie, re.IGNORECASE)
+        parties.insert(0, romain.group(1) if romain else partie)
+        a = a[:m.start()]
+    return a.strip(), (", ".join(parties) or None)
 
 
 def _sans_subdivision(a):
-    """Retire de la fin d'une désignation d'article les mentions de paragraphe et d'alinéa
-    (voir `_RE_SUBDIVISION`), même enchaînées : « L. 181-18, I, al. 2 » -> « L. 181-18 »."""
-    precedent = None
-    while precedent != a:
-        precedent, a = a, _RE_SUBDIVISION.sub("", a)
-    return a
+    """La désignation sans ses mentions de subdivision sans ambiguïté (voir `_decouper`)."""
+    return _decouper(a)[0]
 
 
-def _art_candidates(article):
-    """Du plus spécifique au plus général : retire le mot « article » ou « art. » en tête, les
-    alinéas (« 8° », « a) ») et, en cascade, les subdivisions terminales séparées par un tiret
-    (ex. CGI 158-5-a -> 158).
-    « L. 314-11 8° » -> ['L314-11', 'L314'] ; « 158-5-a » -> ['158-5-a','158-5','158'] ;
-    « Article L. 181-18 » -> ['L181-18', 'L181'] ; « article 6 » -> ['6'] ;
-    « L. 181-18, I, al. 2 » -> ['L181-18', 'L181']."""
-    a = _RE_PREFIXE_ARTICLE.sub("", article or "")      # retire « article », « art. »
-    a = _sans_subdivision(a)                              # retire « , I », « al. 2 »
-    a = re.sub(r"\s*\d+\s*°.*$", "", a)                  # retire « 8° … »
-    a = re.sub(r"\s*[a-zA-Z]\s*\)\s*$", "", a)          # retire « a) »
+def _formes(a, cascade=True):
+    """Graphies d'un numéro d'article à essayer auprès de Légifrance, de la plus spécifique à la
+    plus générale ; avec `cascade`, les subdivisions terminales séparées par un tiret sont retirées
+    tour à tour (CGI 158-5-a -> 158)."""
     core = re.sub(r"[\s.]", "", a.strip())                # « L. 314-11 » -> « L314-11 »
     bases = [core] if core else []
-    while "-" in core:
+    while cascade and "-" in core:
         core = core.rsplit("-", 1)[0]
         if core and core not in bases:
             bases.append(core)
@@ -379,17 +393,53 @@ def _art_candidates(article):
     return cands
 
 
+def _candidats_detail(article):
+    """Les numéros à essayer pour `article` (voir `_art_candidates`), chacun avec le chiffre romain
+    final qu'il laisse de côté (None s'il n'en laisse pas), et la subdivision sans ambiguïté
+    retirée de la désignation. Renvoie ([(numéro, romain)], subdivision)."""
+    numero, subdivision = _decouper(article)
+    m = _RE_ROMAIN_FINAL.match(numero)
+    if not m:
+        return [(c, None) for c in _formes(numero)], subdivision
+    detail = [(c, None) for c in _formes(numero, cascade=False)]
+    deja = {c for c, _ in detail}
+    detail += [(c, m.group(2)) for c in _formes(m.group(1)) if c not in deja]
+    return detail, subdivision
+
+
+def _art_candidates(article):
+    """Du plus spécifique au plus général : retire le mot « article » ou « art. » en tête, les
+    mentions de subdivision sans ambiguïté (« , I », « al. 2 », « 8° », « a) ») et, en cascade,
+    les subdivisions terminales séparées par un tiret (ex. CGI 158-5-a -> 158). Un chiffre romain
+    final sans virgule est d'abord gardé, puis retiré (« 150 V » est un article du CGI).
+    « L. 314-11 8° » -> ['L314-11', 'L314'] ; « 158-5-a » -> ['158-5-a','158-5','158'] ;
+    « Article L. 181-18 » -> ['L181-18', 'L181'] ; « article 6 » -> ['6'] ;
+    « L. 181-18, I, al. 2 » -> ['L181-18', 'L181'] ;
+    « L. 181-18 V » -> ['L181-18 V', 'L181-18V', 'L181-18', 'L181']."""
+    return [c for c, _ in _candidats_detail(article)[0]]
+
+
+def _subdivision_rendue(subdivision, romain):
+    """Subdivision à signaler dans la réponse : celle retirée de la désignation, précédée du
+    chiffre romain laissé de côté, s'il y en a un. None s'il n'y a rien."""
+    parties = [p for p in (romain, subdivision) if p]
+    return ", ".join(parties) or None
+
+
 def _meme_article(demande, rendu):
     """Deux écritures d'un même numéro d'article (« L. 321-3 » et « L321-3 ») désignent-elles le
     même article ? Comparaison sur la forme canonique, sans « article » ou « art. » en tête,
-    sans espaces ni points, alinéas retirés."""
+    sans espaces ni points, mentions de subdivision retirées. Un chiffre romain final peut être
+    un paragraphe : « L. 181-18 V » désigne aussi bien L. 181-18 que L. 181-18 V."""
     def canon(x):
-        x = _RE_PREFIXE_ARTICLE.sub("", str(x or ""))       # « article », « art. »
-        x = _sans_subdivision(x)                             # « , I », « al. 2 »
-        x = re.sub(r"\s*\d+\s*°.*$", "", x)                 # « 8° … »
-        x = re.sub(r"\s*[a-zA-Z]\s*\)\s*$", "", x)          # « a) »
-        return re.sub(r"[\s.‑]", "", x).strip().lower()
-    return bool(canon(demande)) and canon(demande) == canon(rendu)
+        return re.sub(r"[\s.‑]", "", _sans_subdivision(str(x or ""))).strip().lower()
+    voulu, rendu = canon(demande), canon(rendu)
+    if not voulu:
+        return False
+    if voulu == rendu:
+        return True
+    m = _RE_ROMAIN_FINAL.match(_sans_subdivision(str(demande or "")))
+    return bool(m) and canon(m.group(1)) == rendu
 
 
 _RE_NUM_LOI = re.compile(r"n[°º]\s*(\d{2,4}[-‑]\d+)")
@@ -458,9 +508,13 @@ def resoudre_loi(nom, article, date, exact=False):
         if len(_TOC_CACHE) > 40:
             _TOC_CACHE.clear()
         _TOC_CACHE[ck] = r
-    voulus = [_fold(x) for x in _art_candidates(article)]
+    detail, subdivision = _candidats_detail(article)
+    voulus = {}
+    for c, romain in detail:
+        voulus.setdefault(_fold(c), romain)
     for a in _articles_de_loda(r, []):
         if _fold(str(a.get("num") or "")) in voulus:
+            subdiv = _subdivision_rendue(subdivision, voulus[_fold(str(a.get("num") or ""))])
             html = a.get("content") or a.get("texteHtml") or ""
             aid = a.get("id") or a.get("cid") or ""
             # L'ARTICLE RENDU EST-IL BIEN CELUI DEMANDÉ ? La recherche procède en cascade, du plus
@@ -481,6 +535,8 @@ def resoudre_loi(nom, article, date, exact=False):
                 "lien": ("https://www.legifrance.gouv.fr/loda/article_lc/%s" % aid) if aid
                         else ("https://www.legifrance.gouv.fr/loda/id/%s" % tid),
             }
+            if subdiv:
+                r["subdivision"] = subdiv
             return _ecarter_inexact(r) if exact else r
     return {"code": nom, "article": article, "date": date, "trouve": False, "brut": None}
 
@@ -488,7 +544,8 @@ def resoudre_loi(nom, article, date, exact=False):
 def resoudre(code, article, date, exact=False):
     """Retourne l'article de <code> portant le n° <article>, dans sa version au <date>.
     Tolère les alias de codes (CESEDA, CGI, LPF...), le mot « article » ou « art. » devant le
-    numéro et les suffixes d'alinéa (« 8° »). `version_fin` vaut None pour une version sans
+    numéro et les mentions de subdivision (« , I », « al. 2 », « 8° ») ; la subdivision citée
+    est rendue dans `subdivision`, pour ne pas perdre la précision de la citation. `version_fin` vaut None pour une version sans
     terme, c'est-à-dire encore en vigueur (voir `_iso_fin`).
 
     Par défaut, un article autre que celui demandé, renvoyé par la cascade de `_art_candidates`,
@@ -508,7 +565,8 @@ def resoudre(code, article, date, exact=False):
     if not code_connu(code) and _RE_NUM_LOI.search(code or ""):
         return resoudre_loi(code, article, date, exact=exact)
     code = _canon_code(code)
-    for num in _art_candidates(article):
+    detail, subdivision = _candidats_detail(article)
+    for num, romain in detail:
         payload = {"recherche": {
             "champs": [{"typeChamp": "NUM_ARTICLE",
                         "criteres": [{"typeRecherche": "EXACTE", "valeur": num, "operateur": "ET"}],
@@ -542,6 +600,9 @@ def resoudre(code, article, date, exact=False):
             "version_fin": _iso_fin(art.get("dateFin")),
             "lien": f"https://www.legifrance.gouv.fr/codes/article_lc/{art.get('id') or ids[0]}",
         }
+        subdiv = _subdivision_rendue(subdivision, romain)
+        if subdiv:
+            r["subdivision"] = subdiv
         return _ecarter_inexact(r) if exact else r
     return {"code": code, "article": article, "date": date, "trouve": False, "brut": None}
 
@@ -565,7 +626,8 @@ def _designations(texte):
     « articles L. 181-18 et L. 181-19 », « L. 181-18, L. 181-19 et L. 181-21 », « L. 181-18 à
     L. 181-20 », « articles 1240 et 1241 ». Un numéro sans préfixe reprend celui du numéro
     précédent (« L. 181-18 et 181-19 » : deux articles L.). Les mentions de paragraphe et
-    d'alinéa sont ignorées (« L. 181-18, I et L. 181-19 »). « et suivants » est refusé : la liste
+    d'alinéa restent attachées à leur article (« L. 181-18, I et L. 181-19 » : « L. 181-18, I »
+    et « L. 181-19 »), qui les rend dans `subdivision`. « et suivants » est refusé : la liste
     n'est pas fermée."""
     t = _RE_PREFIXE_ARTICLE.sub("", texte or "").strip()
     if _RE_SUIVANTS.search(t):
@@ -575,7 +637,7 @@ def _designations(texte):
 
     def numero(x):
         nonlocal prefixe
-        x = _sans_subdivision(_RE_PREFIXE_ARTICLE.sub("", x).strip()).strip()
+        x = _RE_PREFIXE_ARTICLE.sub("", x).strip()
         m = _RE_PREFIXE_NUM.match(x)
         if m:
             prefixe = m.group(1).upper() + "."
@@ -585,7 +647,12 @@ def _designations(texte):
 
     for morceau in re.split(r"\s*(?:,|;|\bet\b)\s*", t):
         morceau = morceau.strip()
-        if not morceau or _RE_MORCEAU_SUBDIVISION.match(morceau):
+        if not morceau:
+            continue
+        if _RE_MORCEAU_SUBDIVISION.match(morceau):
+            # « L. 181-18, I » : la mention reste attachée à l'article qui précède
+            if elements and elements[-1][0] == "article":
+                elements[-1] = ("article", elements[-1][1] + ", " + morceau)
             continue
         m = _RE_PLAGE.match(morceau)
         if m:

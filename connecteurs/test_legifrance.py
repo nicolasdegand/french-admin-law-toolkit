@@ -329,18 +329,63 @@ class TermesDeRecherche(unittest.TestCase):
 
 
 class Subdivisions(unittest.TestCase):
-    """Mentions de paragraphe et d'alinéa retirées du numéro ; lettres finales gardées."""
+    """Mentions de subdivision retirées du numéro et rendues dans `subdivision` ; chiffre romain
+    final essayé d'abord comme partie du numéro (CGI 150 V), puis comme paragraphe."""
 
     def test_retirees(self):
-        for article in ("article L. 181-18, I", "L. 181-18 (II)", "L. 181-18 al. 2", "L. 181-18, alinéa 3",
-                        "L. 181-18, premier alinéa", "L. 181-18, I, al. 2", "les articles L. 181-18"):
+        cas = {"article L. 181-18, I": "I", "L. 181-18 (II)": "II", "L. 181-18 al. 2": "al. 2",
+               "L. 181-18, alinéa 3": "alinéa 3", "L. 181-18, premier alinéa": "premier alinéa",
+               "L. 181-18, I, al. 2": "I, al. 2", "les articles L. 181-18": None}
+        for article, subdivision in cas.items():
             with self.subTest(article=article):
                 self.assertEqual(legifrance._art_candidates(article)[0], "L181-18")
                 self.assertTrue(legifrance._meme_article(article, "L181-18"))
+                self.assertEqual(legifrance._candidats_detail(article)[1], subdivision)
 
-    def test_gardees(self):
+    def test_lettres_gardees(self):
         self.assertEqual(legifrance._art_candidates("L. 54 A")[0], "L54 A")
-        self.assertEqual(legifrance._art_candidates("1649 X")[0], "1649 X")
+        self.assertEqual(legifrance._art_candidates("150 VB"), ["150 VB", "150VB"])
+        self.assertEqual(legifrance._art_candidates("1649 quater A")[0], "1649 quater A")
+
+    def test_romain_final(self):
+        # Le numéro tel qu'il est écrit d'abord, puis sans le chiffre romain, avant toute cascade.
+        self.assertEqual(legifrance._art_candidates("150 V"), ["150 V", "150V", "150"])
+        self.assertEqual(legifrance._art_candidates("L. 181-18 V"),
+                         ["L181-18 V", "L181-18V", "L181-18", "L181"])
+        self.assertEqual(legifrance._candidats_detail("L. 181-18 V, al. 2")[0][2], ("L181-18", "V"))
+        self.assertTrue(legifrance._meme_article("150 V", "150 V"))
+        self.assertTrue(legifrance._meme_article("L. 181-18 V", "L181-18"))
+        self.assertFalse(legifrance._meme_article("L. 181-18 V", "L181-19"))
+
+    def resoudre(self, article, existants):
+        """`resoudre` avec un Légifrance simulé qui ne connaît que les numéros `existants`."""
+        def _post(chemin, charge):
+            if chemin == "/search":
+                num = charge["recherche"]["champs"][0]["criteres"][0]["valeur"]
+                return {"results": [{"id": "LEGIARTI000000000001"}]} if num in existants else {"results": []}
+            if chemin == "/consult/getArticle":
+                return {"article": {"id": "LEGIARTI000000000001", "num": self.rendu, "texte": "Texte."}}
+            raise AssertionError("appel inattendu : " + chemin)
+        self.rendu = existants[0]
+        with mock.patch.object(legifrance, "_CODES_MAP", {"code de l'environnement": "Code de l'environnement"}), \
+             mock.patch.object(legifrance, "_post", _post):
+            return legifrance.resoudre("Code de l'environnement", article, "2024-01-01", exact=True)
+
+    def test_subdivision_rendue(self):
+        r = self.resoudre("L. 181-18, I, al. 2", ["L181-18"])
+        self.assertTrue(r["trouve"])
+        self.assertEqual(r["subdivision"], "I, al. 2")
+        self.assertNotIn("subdivision", self.resoudre("L. 181-18", ["L181-18"]))
+
+    def test_romain_partie_du_numero(self):
+        r = self.resoudre("150 V", ["150 V"])
+        self.assertEqual((r["trouve"], r["num"]), (True, "150 V"))
+        self.assertNotIn("subdivision", r)
+
+    def test_romain_paragraphe(self):
+        r = self.resoudre("L. 181-18 V, al. 2", ["L181-18"])
+        self.assertEqual((r["trouve"], r["exact"], r["num"]), (True, True, "L181-18"))
+        self.assertEqual(r["subdivision"], "V, al. 2")
 
 
 class Designations(unittest.TestCase):
@@ -354,8 +399,8 @@ class Designations(unittest.TestCase):
             "L. 181-18 à L. 181-20": [("plage", "L. 181-18", "L. 181-20")],
             "L. 181-18 et 181-19": [("article", "L. 181-18"), ("article", "L. 181-19")],
             "R. 181-28 à 181-30": [("plage", "R. 181-28", "R. 181-30")],
-            "L. 181-18, I et L. 181-19, al. 2": [("article", "L. 181-18"), ("article", "L. 181-19")],
-            "L. 181-18, 3° et L. 181-19": [("article", "L. 181-18"), ("article", "L. 181-19")],
+            "L. 181-18, I et L. 181-19, al. 2": [("article", "L. 181-18, I"), ("article", "L. 181-19, al. 2")],
+            "L. 181-18, 3° et L. 181-19": [("article", "L. 181-18, 3°"), ("article", "L. 181-19")],
             "articles 1240 et 1241": [("article", "1240"), ("article", "1241")],
             "articles 6, 7 et 8": [("article", "6"), ("article", "7"), ("article", "8")],
             "L. 314-11 8°": [("article", "L. 314-11 8°")],
@@ -438,6 +483,10 @@ class ResoudrePlusieurs(unittest.TestCase):
 
     def test_plage(self):
         self.assertEqual(self.nums(self.appeler("L. 181-18 à L. 181-20")), ["L181-18", "L181-19", "L181-20"])
+
+    def test_subdivision_transmise(self):
+        # La mention de subdivision reste attachée à son article, que `resoudre` rend ensuite.
+        self.assertEqual(self.nums(self.appeler("L. 181-18, I et L. 181-21")), ["L181-18,I", "L181-21"])
 
     def test_plage_et_article(self):
         self.assertEqual(self.nums(self.appeler("L. 181-17 et L. 181-19 à 181-21")),
