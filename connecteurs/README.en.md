@@ -129,8 +129,8 @@ President of the Republic and the ratifying act, taken from the ordinance's
 legislative file, and the enabling act (*loi d'habilitation*), sought among the
 acts cited in the recitals (« Vu la loi n° …, notamment son article … »). When the report
 to the President names the enabling act, only that one is returned
-(`habilitation`); otherwise all candidates are, unranked
-(`habilitation_candidates`).
+(`habilitation`); otherwise all potential ones are, unranked
+(`habilitations_potentielles`).
 
 ## EUR-Lex
 
