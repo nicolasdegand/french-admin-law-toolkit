@@ -126,10 +126,11 @@ legislature's intent.
 An ordinance has no parliamentary debates. For one, the response carries an
 `ordonnance` field giving, when Légifrance indicates them, the report to the
 President of the Republic and the ratifying act, taken from the ordinance's
-legislative file, and the candidate enabling acts (*lois d'habilitation*), taken
-from the recitals (« Vu la loi n° …, notamment son article … »). Candidates are
-not ranked; the one the report to the President names as the enabling act is
-flagged (`designee_par_le_rapport`).
+legislative file, and the enabling act (*loi d'habilitation*), sought among the
+acts cited in the recitals (« Vu la loi n° …, notamment son article … »). When the report
+to the President names the enabling act, only that one is returned
+(`habilitation`); otherwise all candidates are, unranked
+(`habilitation_candidates`).
 
 ## EUR-Lex
 

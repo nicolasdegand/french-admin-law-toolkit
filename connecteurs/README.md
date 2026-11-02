@@ -122,10 +122,10 @@ ordonnance, ou semble être une codification, la réponse porte un
 Une ordonnance n'a pas de débats parlementaires. Pour elle, la réponse porte un
 champ `ordonnance` qui donne, quand Légifrance les indique, le rapport au
 Président de la République et la loi de ratification, pris dans le dossier de
-l'ordonnance, et les lois d'habilitation candidates, tirées des visas (« Vu la
-loi n° …, notamment son article … »). Les candidates ne sont pas départagées ;
-celle que le rapport au Président désigne comme loi d'habilitation est marquée
-(`designee_par_le_rapport`).
+l'ordonnance, et la loi d'habilitation, cherchée parmi les lois que citent les
+visas (« Vu la loi n° …, notamment son article … »). Quand le rapport au Président désigne la
+loi d'habilitation, seule celle-ci est renvoyée (`habilitation`) ; sinon, les
+candidates le sont toutes, sans être départagées (`habilitation_candidates`).
 
 ## EUR-Lex
 

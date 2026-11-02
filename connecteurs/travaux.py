@@ -65,8 +65,8 @@ _AVERTISSEMENT_ORDONNANCE = (
     "Version issue d'une ordonnance : pas de débats parlementaires sur ce texte. À consulter : "
     "le rapport au Président de la République publié avec l'ordonnance, la loi d'habilitation et "
     "ses travaux, et, s'il y a lieu, la loi de ratification et ses travaux. Le champ `ordonnance` "
-    "donne ceux que Légifrance indique ; les lois d'habilitation y sont des candidates, tirées des "
-    "visas, à vérifier.")
+    "donne ceux que Légifrance indique ; quand le rapport ne désigne pas la loi d'habilitation, "
+    "les lois des visas qui peuvent l'être y sont des candidates, à vérifier.")
 _AVERTISSEMENT_CODIFICATION = (
     "Le titre de ce texte évoque une codification : si elle est à droit constant, l'intention du "
     "législateur se trouve dans les travaux de la loi d'origine des dispositions codifiées.")
@@ -260,14 +260,16 @@ def _textes_de_l_ordonnance(visa, pieces):
       qui les donnent régulièrement (constaté le 02/11/2026 sur 10 ordonnances : « Rapport au
       Président de la République relatif à l'ordonnance [...] », « LOI n° 2018-148 [...] ratifiant
       l'ordonnance [...] » ou « Ordonnance ratifiée par l'article 56-III de la loi n° 2018-727 »);
-    - `habilitation` : les lois que les visas citent pour certains de leurs articles (« notamment
-      son article 106 »), sans hiérarchie. Les visas citent aussi d'autres lois, et parfois plus
-      d'une ainsi : pour l'ordonnance n° 2017-80, la loi n° 74-696 (article 23) et la loi
-      n° 2015-990 (articles 103 et 106). Une loi que le rapport au Président désigne comme loi
-      d'habilitation porte `designee_par_le_rapport` True : une phrase du rapport évoque
-      l'habilitation et donne son numéro, sa date (« l'article 103 de la loi du 6 août 2015
-      susmentionné habilite le Gouvernement [...] ») ou un article que les visas citent pour elle
-      (« l'article 8 de la loi d'habilitation », ordonnance n° 2016-131)."""
+    - `habilitation` : la ou les lois d'habilitation que le rapport au Président désigne. Les
+      candidates sont les lois que les visas citent pour certains de leurs articles (« notamment
+      son article 106 ») ; les visas en citent parfois plus d'une ainsi : pour l'ordonnance
+      n° 2017-80, la loi n° 74-696 (article 23) et la loi n° 2015-990 (articles 103 et 106). Une
+      candidate est désignée quand une phrase du rapport évoque l'habilitation et donne son
+      numéro, sa date (« l'article 103 de la loi du 6 août 2015 susmentionné habilite le
+      Gouvernement [...] ») ou un article que les visas citent pour elle (« l'article 8 de la loi
+      d'habilitation », ordonnance n° 2016-131) ;
+    - `habilitation_candidates`, à la place, quand le rapport n'en désigne aucune (il manque ou
+      n'évoque pas l'habilitation) : toutes les candidates, sans hiérarchie, à vérifier."""
     ordonnance, panne = {}, None
     rapport = [p for p in pieces if (p.get("libelle") or "").lower().startswith("rapport au président")]
     if rapport:
@@ -281,7 +283,7 @@ def _textes_de_l_ordonnance(visa, pieces):
     for m in _RE_VISA_LOI.finditer(visas):
         if m.group(2) not in [c["numero"] for c in candidats]:
             candidats.append({"loi": m.group(1).strip(), "numero": m.group(2),
-                              "articles": m.group(4).strip().rstrip("."), "designee_par_le_rapport": False})
+                              "articles": m.group(4).strip().rstrip(".")})
     if candidats and rapport:
         cid = rapport[0]["lien"].rstrip("/").rsplit("/", 1)[-1]
         try:
@@ -292,16 +294,19 @@ def _textes_de_l_ordonnance(visa, pieces):
             date = _RE_DATE_TEXTE.search(c["loi"])
             reperes = [c["numero"]] + ([date.group(1)] if date else [])
             articles = [r"\barticle\s+%s\b" % n for n in re.findall(r"\d+", c["articles"])]
-            c["designee_par_le_rapport"] = any(
+            c["designee"] = any(
                 r in ph for ph in phrases for r in reperes) or any(
                 re.search(a, ph) for ph in phrases for a in articles)
-    for c in candidats:
+    designees = [c for c in candidats if c.get("designee")]
+    retenues = designees or candidats
+    for c in retenues:
+        c.pop("designee", None)
         try:
             c["lien"] = legifrance.lien_loi(c["numero"])
         except Exception as e:
             c["lien"], panne = None, panne or legifrance._panne(e)
-    if candidats:
-        ordonnance["habilitation"] = candidats
+    if retenues:
+        ordonnance["habilitation" if designees else "habilitation_candidates"] = retenues
     return ordonnance, panne
 
 

@@ -568,8 +568,8 @@ class TextesDeLOrdonnance(unittest.TestCase):
              mock.patch.object(travaux.legifrance, "lien_loi", lambda n: "https://exemple.invalid/" + n):
             return travaux._textes_de_l_ordonnance(visa, pieces)
 
-    def habilitation(self, o):
-        return [(h["numero"], h["designee_par_le_rapport"]) for h in o["habilitation"]]
+    def lois(self, o, champ):
+        return [h["numero"] for h in o[champ]]
 
     def test_rapport_et_ratification(self):
         o, panne = self.appeler("Monsieur le Président.")
@@ -577,28 +577,34 @@ class TextesDeLOrdonnance(unittest.TestCase):
         self.assertEqual(o["rapport_au_president"]["lien"], self.PIECES[1]["lien"])
         self.assertEqual([r["lien"] for r in o["ratification"]], [self.PIECES[2]["lien"]])
 
-    def test_candidats_des_visas(self):
+    def test_candidates_sans_designation(self):
+        # Le rapport n'évoque pas l'habilitation : les lois des visas citées avec « notamment »
+        # sont toutes renvoyées comme candidates ; celle citée sans « notamment » est écartée.
         o, _ = self.appeler("Monsieur le Président.")
-        self.assertEqual(self.habilitation(o), [("74-9999", False), ("2015-9999", False)])
-        self.assertEqual(o["habilitation"][1]["articles"], "ses articles 103 et 106")
-        self.assertEqual(o["habilitation"][1]["lien"], "https://exemple.invalid/2015-9999")
+        self.assertNotIn("habilitation", o)
+        self.assertEqual(self.lois(o, "habilitation_candidates"), ["74-9999", "2015-9999"])
+        self.assertEqual(o["habilitation_candidates"][1]["articles"], "ses articles 103 et 106")
+        self.assertEqual(o["habilitation_candidates"][1]["lien"], "https://exemple.invalid/2015-9999")
 
     def test_designee_par_la_date(self):
         o, _ = self.appeler("L'article 103 de la loi du 6 août 2015 susmentionné habilite le Gouvernement à agir.")
-        self.assertEqual(self.habilitation(o), [("74-9999", False), ("2015-9999", True)])
+        self.assertEqual(self.lois(o, "habilitation"), ["2015-9999"])
+        self.assertNotIn("habilitation_candidates", o)
 
     def test_designee_par_le_numero(self):
         o, _ = self.appeler("La loi n° 2015-9999 a habilité le Gouvernement.")
-        self.assertEqual(self.habilitation(o), [("74-9999", False), ("2015-9999", True)])
+        self.assertEqual(self.lois(o, "habilitation"), ["2015-9999"])
+        self.assertNotIn("habilitation_candidates", o)
 
     def test_designee_par_l_article(self):
         o, _ = self.appeler("Conformément à l'article 106 de la loi d'habilitation, l'ordonnance prévoit...")
-        self.assertEqual(self.habilitation(o), [("74-9999", False), ("2015-9999", True)])
+        self.assertEqual(self.lois(o, "habilitation"), ["2015-9999"])
+        self.assertNotIn("habilitation_candidates", o)
 
     def test_panne_sur_le_rapport(self):
         o, panne = self.appeler("", panne=True)
         self.assertIn("503", panne)
-        self.assertEqual(self.habilitation(o), [("74-9999", False), ("2015-9999", False)])
+        self.assertEqual(self.lois(o, "habilitation_candidates"), ["74-9999", "2015-9999"])
 
     def test_sans_rapport_ni_visa(self):
         def interdit(chemin, charge):
@@ -627,7 +633,7 @@ class TextesDeLOrdonnance(unittest.TestCase):
              mock.patch.object(travaux.legifrance, "lien_loi", lambda n: None):
             r = travaux.travaux_pour_article("Code de l'environnement", "L. 181-18", "2020-01-01")
         self.assertEqual(r["ordonnance"]["rapport_au_president"]["lien"], self.PIECES[1]["lien"])
-        self.assertEqual(self.habilitation(r["ordonnance"]), [("74-9999", False), ("2015-9999", True)])
+        self.assertEqual(self.lois(r["ordonnance"], "habilitation"), ["2015-9999"])
         self.assertIn(travaux._AVERTISSEMENT_ORDONNANCE, r["avertissement"])
         self.assertNotIn("ordonnance", PlusieursTextes().travaux([
             {"linkType": "MODIFIE", "linkOrientation": "cible", "textCid": "JORFTEXT000000000013",
