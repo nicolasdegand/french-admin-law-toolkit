@@ -64,7 +64,9 @@ _MESSAGE_PANNE = "PISTE n'a pas répondu : recherche inaboutie, à relancer."
 _AVERTISSEMENT_ORDONNANCE = (
     "Version issue d'une ordonnance : pas de débats parlementaires sur ce texte. À consulter : "
     "le rapport au Président de la République publié avec l'ordonnance, la loi d'habilitation et "
-    "ses travaux, et, s'il y a lieu, la loi de ratification et ses travaux.")
+    "ses travaux, et, s'il y a lieu, la loi de ratification et ses travaux. Le champ `ordonnance` "
+    "donne ceux que Légifrance indique ; les lois d'habilitation y sont des candidates, tirées des "
+    "visas, à vérifier.")
 _AVERTISSEMENT_CODIFICATION = (
     "Le titre de ce texte évoque une codification : si elle est à droit constant, l'intention du "
     "législateur se trouve dans les travaux de la loi d'origine des dispositions codifiées.")
@@ -200,10 +202,11 @@ def _travaux_du_texte(lien):
     `travaux_preparatoires`, `pieces`, `expose_motif` et, s'il y a lieu, `avertissement` ;
     `panne` est le message de l'incident si PISTE n'a pas répondu, None sinon."""
     cid = lien["textCid"]
-    doss_id, prep, panne = None, "", None
+    doss_id, prep, panne, visa = None, "", None, ""
     nature, titre = lien.get("natureText"), lien.get("textTitle")
     try:
         js = legifrance._post("/consult/jorf", {"textCid": cid})
+        visa = js.get("visa") or ""
         nature = js.get("nature") or nature
         titre = js.get("title") or titre
         prep = _clean(js.get("prepWork"))
@@ -225,12 +228,93 @@ def _travaux_du_texte(lien):
     if autres:
         texte["autres_dossiers"] = [{"titre": re.sub(r"\s+", " ", d.get("titre") or "").strip(),
                                      "lien": _lien_dossier(d.get("id"))} for d in autres]
+    if _est_ordonnance(nature, titre):
+        texte["ordonnance"], p = _textes_de_l_ordonnance(visa, dp.get("pieces", []))
+        panne = panne or p
     avertissements = _avertissements(nature, titre)
     if autres and not propre:
         avertissements.append(_AVERTISSEMENT_DOSSIERS)
     if avertissements:
         texte["avertissement"] = " ".join(avertissements)
     return texte, panne or dp.get("panne")
+
+
+def _est_ordonnance(nature, titre):
+    return (nature or "").strip().upper() == "ORDONNANCE" or (titre or "").strip().lower().startswith("ordonnance")
+
+
+# Visa d'une loi citée pour certains de ses articles : « Vu la loi n° 2015-990 du 6 août 2015 pour
+# la croissance [...], notamment ses articles 103 et 106 ».
+_RE_VISA_LOI = re.compile(
+    r"Vu\s+(la\s+loi\s+(?:organique\s+)?n[°º]\s*(\d{2,4}-\d+)([^;]*?)),\s*notamment\s+([^;]+)", re.I)
+_RE_DATE_TEXTE = re.compile(r"du\s+(\d{1,2}(?:er)?\s+\w+\s+\d{4})", re.I)
+
+
+def _textes_de_l_ordonnance(visa, pieces):
+    """Textes à consulter pour une ordonnance, faute de débats parlementaires sur elle-même.
+    `visa` : visas de l'ordonnance (HTML de /consult/jorf) ; `pieces` : pièces de son dossier
+    législatif. Renvoie (ordonnance, panne).
+
+    `ordonnance` porte, quand Légifrance les indique :
+    - `rapport_au_president` et `ratification` : pris dans les textes du dossier de l'ordonnance,
+      qui les donnent régulièrement (constaté le 02/11/2026 sur 10 ordonnances : « Rapport au
+      Président de la République relatif à l'ordonnance [...] », « LOI n° 2018-148 [...] ratifiant
+      l'ordonnance [...] » ou « Ordonnance ratifiée par l'article 56-III de la loi n° 2018-727 »);
+    - `habilitation` : les lois que les visas citent pour certains de leurs articles (« notamment
+      son article 106 »), sans hiérarchie. Les visas citent aussi d'autres lois, et parfois plus
+      d'une ainsi : pour l'ordonnance n° 2017-80, la loi n° 74-696 (article 23) et la loi
+      n° 2015-990 (articles 103 et 106). Une loi que le rapport au Président désigne comme loi
+      d'habilitation porte `designee_par_le_rapport` True : une phrase du rapport évoque
+      l'habilitation et donne son numéro, sa date (« l'article 103 de la loi du 6 août 2015
+      susmentionné habilite le Gouvernement [...] ») ou un article que les visas citent pour elle
+      (« l'article 8 de la loi d'habilitation », ordonnance n° 2016-131)."""
+    ordonnance, panne = {}, None
+    rapport = [p for p in pieces if (p.get("libelle") or "").lower().startswith("rapport au président")]
+    if rapport:
+        ordonnance["rapport_au_president"] = {"titre": rapport[0]["libelle"], "lien": rapport[0]["lien"]}
+    ratif = [p for p in pieces if p.get("categorie") == "Textes du dossier"
+             and re.search(r"ratifi", p.get("libelle") or "", re.I)]
+    if ratif:
+        ordonnance["ratification"] = [{"titre": p["libelle"], "lien": p["lien"]} for p in ratif]
+    visas = re.sub(r"\s+", " ", " ".join(_clean(visa).split("\n")))
+    candidats = []
+    for m in _RE_VISA_LOI.finditer(visas):
+        if m.group(2) not in [c["numero"] for c in candidats]:
+            candidats.append({"loi": m.group(1).strip(), "numero": m.group(2),
+                              "articles": m.group(4).strip().rstrip("."), "designee_par_le_rapport": False})
+    if candidats and rapport:
+        cid = rapport[0]["lien"].rstrip("/").rsplit("/", 1)[-1]
+        try:
+            phrases = [ph for ph in re.split(r"(?<=[.;])\s+", _texte_complet(cid)) if re.search(r"habilit", ph, re.I)]
+        except Exception as e:
+            phrases, panne = [], legifrance._panne(e)
+        for c in candidats:
+            date = _RE_DATE_TEXTE.search(c["loi"])
+            reperes = [c["numero"]] + ([date.group(1)] if date else [])
+            articles = [r"\barticle\s+%s\b" % n for n in re.findall(r"\d+", c["articles"])]
+            c["designee_par_le_rapport"] = any(
+                r in ph for ph in phrases for r in reperes) or any(
+                re.search(a, ph) for ph in phrases for a in articles)
+    for c in candidats:
+        try:
+            c["lien"] = legifrance.lien_loi(c["numero"])
+        except Exception as e:
+            c["lien"], panne = None, panne or legifrance._panne(e)
+    if candidats:
+        ordonnance["habilitation"] = candidats
+    return ordonnance, panne
+
+
+def _texte_complet(cid):
+    """Texte d'un texte du Journal officiel (visas et articles), en une chaîne."""
+    js = legifrance._post("/consult/jorf", {"textCid": cid})
+    morceaux = [js.get("visa") or ""]
+    for a in js.get("articles") or []:
+        morceaux.append(a.get("content") or a.get("texte") or "")
+    for sec in js.get("sections") or []:
+        for a in sec.get("articles") or []:
+            morceaux.append(a.get("content") or "")
+    return re.sub(r"\s+", " ", " ".join(_clean(m) for m in morceaux))
 
 
 _RE_NUMERO_TEXTE = re.compile(r"n[°º]\s*(\d{2,4}-\d+)")

@@ -119,6 +119,14 @@ module retient le dossier de la loi elle-même, et liste les autres dans
 ordonnance, ou semble être une codification, la réponse porte un
 `avertissement` qui indique où chercher l'intention du législateur.
 
+Une ordonnance n'a pas de débats parlementaires. Pour elle, la réponse porte un
+champ `ordonnance` qui donne, quand Légifrance les indique, le rapport au
+Président de la République et la loi de ratification, pris dans le dossier de
+l'ordonnance, et les lois d'habilitation candidates, tirées des visas (« Vu la
+loi n° …, notamment son article … »). Les candidates ne sont pas départagées ;
+celle que le rapport au Président désigne comme loi d'habilitation est marquée
+(`designee_par_le_rapport`).
+
 ## EUR-Lex
 
 ```python
